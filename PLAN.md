@@ -308,7 +308,7 @@ Each phase ends with something you can run and click through.
 - `LocationProvider` (simulated/browser) in both apps; dev panel.
 - **Done when:** moving a marker in the simulator updates the tab's position within a second.
 
-### Phase 2 — Driver path to "receiving offers"
+### Phase 2 — Driver path to "receiving offers" ✅ (2026-09-25; offer reaches the driver tab in ~150–250ms)
 - D01/D02 auth, D03 menu, D06 home, D07 confirm-online sheet, pause.
 - Location broadcaster port; WS connect; D08 offers with countdowns, ack, accept,
   expired/taken states, `offer_withdrawn`.

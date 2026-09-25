@@ -183,3 +183,5 @@ and the driver's position moving when the simulator moves the driver.
 - **Currency:** fare-estimate returns USD — `fare_configs` has both USD and MYR rows and the backend
   picks USD. The design assumes RM (MYR). UI shows whatever the backend sends; decide in Phase 3.0.
 - D04/D05 screens (verification, vehicles) and D09–D11 not built yet (Phases 4 and 6).
+- Car movement along a route (asked for 2026-09-25) stays in Phase 5 as planned; until then move
+  drivers by clicking/dragging in the simulator.
