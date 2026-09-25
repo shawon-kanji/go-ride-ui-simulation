@@ -1,0 +1,41 @@
+export type Role = 'rider' | 'driver';
+
+export type WsState = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
+
+/** What each rider/driver tab tells the simulator about itself. */
+export interface TabPresence {
+  tabId: string;
+  role: Role | null;
+  path: string;
+  userId: string | null;
+  name: string | null;
+  email: string | null;
+  wsState: WsState;
+  sentAt: number;
+}
+
+export type DevLogKind = 'http' | 'ws-in' | 'ws-out' | 'ws-state' | 'location' | 'state' | 'error';
+
+export interface DevLogEntry {
+  id: string;
+  at: number;
+  tabId: string;
+  role: Role | null;
+  kind: DevLogKind;
+  /** One line, e.g. "POST /api/v1/cab/request-cab 201 142ms". */
+  summary: string;
+  /** Request/response or message body. Secrets are redacted before this is set. */
+  data?: unknown;
+}
+
+/** Messages on the same-origin BroadcastChannel shared by every tab. */
+export type BusMessage =
+  // Duplicate-tab guard: a booting tab claims its tabId; a live tab holding the same id
+  // answers with a conflict addressed to the claimant's bootId.
+  | { type: 'tab-claim'; tabId: string; bootId: string }
+  | { type: 'tab-conflict'; tabId: string; bootId: string }
+  // Presence: sent on change and as a heartbeat; `whois` asks every tab to re-announce.
+  | { type: 'presence'; presence: TabPresence }
+  | { type: 'bye'; tabId: string }
+  | { type: 'whois' }
+  | { type: 'log'; entry: DevLogEntry };
