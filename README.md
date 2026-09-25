@@ -2,7 +2,7 @@
 
 Browser versions of the Go Ride rider and driver apps, plus a simulator page, for fast
 local testing against the real backend. See [PLAN.md](PLAN.md) for the full design and
-phases.
+phases, and [PROGRESS.md](PROGRESS.md) for checkpoints and the next tasks.
 
 | Route | What it is |
 |---|---|
