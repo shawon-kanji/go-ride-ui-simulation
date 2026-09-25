@@ -23,6 +23,7 @@ export function ActorMarker({ tab, selected, stale, onSelect, onMove }: ActorMar
   const style = ROLE_STYLE[tab.role ?? 'rider'];
   const Icon = tab.locationSource === 'browser' ? Navigation : style.Icon;
   const movable = tab.locationSource === 'simulated' && !stale;
+  const dimmed = stale || tab.activity === 'offline';
 
   return (
     <AdvancedMarker
@@ -39,7 +40,7 @@ export function ActorMarker({ tab, selected, stale, onSelect, onMove }: ActorMar
         if (latLng) onMove(latLng.lat(), latLng.lng());
       }}
     >
-      <div className={`flex flex-col items-center ${stale ? 'opacity-40' : ''}`}>
+      <div className={`flex flex-col items-center ${dimmed ? 'opacity-50' : ''}`}>
         <span
           className={`flex h-9 w-9 items-center justify-center rounded-full border-2 border-white text-white shadow-[0_4px_14px_rgba(16,22,20,0.25)] ${style.dot} ${selected ? `scale-110 ring-8 ${style.ring}` : ''}`}
         >
@@ -51,6 +52,7 @@ export function ActorMarker({ tab, selected, stale, onSelect, onMove }: ActorMar
           style={{ color: selected ? '#ffffff' : '#1f2937', fontFamily: 'var(--font-sans)' }}
         >
           {actorLabel(tab)}
+          {tab.activity && tab.activity !== 'offline' ? ` · ${tab.activity}` : ''}
         </span>
       </div>
     </AdvancedMarker>

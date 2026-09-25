@@ -184,7 +184,9 @@ function LocationRow() {
         ))}
       </div>
       {position ? (
-        <span className="font-mono text-[12px]">{formatPoint(position)}</span>
+        <span data-testid="current-location" className="font-mono text-[12px]">
+          {formatPoint(position)}
+        </span>
       ) : (
         <span className="text-neutral-400">
           {source === 'simulated' ? 'Not placed — select this tab in the simulator and click the map' : 'Waiting for a fix…'}

@@ -15,6 +15,8 @@ export interface TabPresence {
   wsState: WsState;
   location: GeoPoint | null;
   locationSource: LocationSource;
+  /** Short status for the simulator, e.g. "online", "paused", "2 offers". */
+  activity: string | null;
   sentAt: number;
 }
 
@@ -34,9 +36,9 @@ export interface DevLogEntry {
 
 /** Messages on the same-origin BroadcastChannel shared by every tab. */
 export type BusMessage =
-  // Duplicate-tab guard: a booting tab claims its tabId; a live tab holding the same id
-  // answers with a conflict addressed to the claimant's bootId.
-  | { type: 'tab-claim'; tabId: string; bootId: string }
+  // Duplicate-tab guard: a booting tab claims its tabId; a tab holding the same id that
+  // booted earlier answers with a conflict addressed to the claimant's bootId.
+  | { type: 'tab-claim'; tabId: string; bootId: string; bootedAt: number }
   | { type: 'tab-conflict'; tabId: string; bootId: string }
   // Presence: sent on change and as a heartbeat; `whois` asks every tab to re-announce.
   | { type: 'presence'; presence: TabPresence }

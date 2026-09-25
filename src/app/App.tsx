@@ -1,8 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { APIProvider } from '@vis.gl/react-google-maps';
-import { createBrowserRouter, Navigate, RouterProvider } from 'react-router';
+import { createBrowserRouter, Navigate, RouterProvider, type RouteObject } from 'react-router';
 
 import { LoginScreen } from '../features/auth/LoginScreen';
+import { DriverLayout } from '../features/driver/DriverLayout';
+import { HomeScreen as DriverHomeScreen } from '../features/driver/screens/HomeScreen';
+import { MenuScreen as DriverMenuScreen } from '../features/driver/screens/MenuScreen';
+import { OffersScreen } from '../features/driver/screens/OffersScreen';
+import { TripAssignedScreen } from '../features/driver/screens/TripAssignedScreen';
 import { SignupScreen } from '../features/auth/SignupScreen';
 import type { Role } from '../shared/tab/types';
 import { HealthPage } from './health/HealthPage';
@@ -17,7 +22,22 @@ const queryClient = new QueryClient({
   },
 });
 
-function roleRoutes(role: Role, path: string) {
+const signedInScreens: Record<Role, RouteObject[]> = {
+  rider: [{ index: true, element: <SignedInPlaceholder role="rider" /> }],
+  driver: [
+    {
+      element: <DriverLayout />,
+      children: [
+        { index: true, element: <DriverHomeScreen /> },
+        { path: 'menu', element: <DriverMenuScreen /> },
+        { path: 'offers', element: <OffersScreen /> },
+        { path: 'trip', element: <TripAssignedScreen /> },
+      ],
+    },
+  ],
+};
+
+function roleRoutes(role: Role, path: string): RouteObject {
   return {
     path,
     element: <RoleShell role={role} />,
@@ -31,10 +51,7 @@ function roleRoutes(role: Role, path: string) {
       },
       {
         element: <RequireSession role={role} />,
-        children: [
-          { index: true, element: <SignedInPlaceholder role={role} /> },
-          { path: '*', element: <Navigate to={`/${path}`} replace /> },
-        ],
+        children: [...signedInScreens[role], { path: '*', element: <Navigate to={`/${path}`} replace /> }],
       },
     ],
   };

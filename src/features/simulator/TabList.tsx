@@ -15,6 +15,13 @@ const WS_DOT: Record<WsState, string> = {
   closed: 'bg-danger-500',
 };
 
+function activityStyle(activity: string): string {
+  if (activity === 'online') return 'bg-success-50 text-success-700';
+  if (activity === 'paused') return 'bg-warning-50 text-warning-700';
+  if (activity === 'offline') return 'bg-neutral-100 text-neutral-600';
+  return 'bg-neutral-900 text-white';
+}
+
 interface TabListProps {
   tabs: RegisteredTab[];
   selectedId: string | null;
@@ -76,6 +83,14 @@ export function TabList({ tabs, selectedId, isStale, onSelect, onLocate }: TabLi
                         <p className="truncate text-[12px] text-neutral-500">
                           {tab.email ?? 'no session'} · <span className="font-mono">{tab.tabId.slice(0, 4)}</span>
                         </p>
+                        {tab.activity && (
+                          <span
+                            data-testid="tab-activity"
+                            className={`mt-1 inline-block rounded-pill px-2 py-0.5 text-[11px] font-bold ${activityStyle(tab.activity)}`}
+                          >
+                            {tab.activity}
+                          </span>
+                        )}
                         <p className="mt-1 flex items-center gap-1.5 whitespace-nowrap text-[12px] text-neutral-600">
                           <span className={`h-1.5 w-1.5 rounded-full ${WS_DOT[tab.wsState]}`} />
                           {stale ? 'stale' : `ws ${tab.wsState}`}
