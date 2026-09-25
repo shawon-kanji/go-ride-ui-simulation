@@ -4,7 +4,7 @@ The working log for this repo. [PLAN.md](PLAN.md) is the design; this file track
 what's next at task level, and what was learned along the way. Update it at the end of
 every working session and every phase.
 
-**Last updated:** 2026-09-25 · **Current phase:** 2 (not started)
+**Last updated:** 2026-09-25 · **Current phase:** 3 (not started)
 
 ---
 
@@ -14,8 +14,8 @@ every working session and every phase.
 |---|---|---|---|
 | 0 Foundation | ✅ done 2026-09-25 | `224865b`…`be97d54` | Unit tests (18), `smoke:firefox` 14/14 |
 | 1 Simulator map + location provider | ✅ done 2026-09-25 | `45ee1ce`, `1660776` | Unit tests (24), `smoke:firefox` 19/19 |
-| 2 Driver → receiving offers | ⏳ next | — | — |
-| 3 Rider booking happy path | ☐ | — | — |
+| 2 Driver → receiving offers | ✅ done 2026-09-25 | `05a60d8`…`2b74e76` | Unit tests (77), `smoke:firefox` 26/26 (offer in ~150–250ms) |
+| 3 Rider booking happy path | ⏳ next | — | — |
 | 4 Trip completion + cancellation | ☐ | — | — |
 | 5 Simulator power features | ☐ | — | — |
 | 6 Remaining screens | ☐ | — | — |
@@ -40,57 +40,84 @@ every working session and every phase.
 
 ---
 
-## Next: Phase 2 — Driver path to "receiving offers"
+### Phase 2 — Driver → receiving offers ✅
+- [x] 2.1 Test data via local DB (SQL below): `sim.driver1`–`3` KYC-approved, one active vehicle each
+      (driver1 Myvi 4-seat normal → RIDE; driver2 Innova 7-seat → RIDE/RIDE_XL; driver3 E-Class luxury → RIDE/RIDE_PREMIUM),
+      5 identity + 5 vehicle documents approved. Verified `PATCH /driver/online` → 200.
+- [x] 2.2 Driver API layer: types from backend/driver-request-handler/location-producers/ws protocol; clients + query hooks
+- [x] 2.3 Ported `deriveOnlineGate`, verification summary, `kycBlockReason`, haversine + their tests (30)
+- [x] 2.4 Screens: D06 home (map, chip, stat cards, verification card, blockers, **online block** — app addition), D07 confirm online, D03 menu, D08 job offers, temporary assigned-trip screen
+- [x] 2.5 Location broadcaster (app rules + 5s tick for heartbeats), lifecycle from server `is_online`
+- [x] 2.6 Offer store + D08: per-offer TTL, `offer_withdrawn`/`trip_cancelled` by request, seen-ack, first-wins accept (409 → taken, 404 → expired), place names via reverse geocode
+- [x] 2.7 Simulator shows driver status; smoke covers online → ping → offer (~150–250ms) → ack → accept
+- [x] Fix found on the way: duplicate-tab guard now defends during boot (`5ed6ef4`)
 
-**Done when:** an online driver tab, placed in the simulator, is picked by dispatch — a rider
-request made nearby (via curl until Phase 3) shows up as an offer card in that driver's tab.
+<details><summary>SQL used for 2.1 (idempotent; re-run if drivers are recreated)</summary>
 
-### 2.1 Test data (local DB, no seed script)
-- [ ] Read go-ride-backend's gating rules first: KYC status derivation, vehicle "verified"
-      rule, and what `PATCH /api/v1/driver/online` checks (`KYC_NOT_APPROVED`,
-      `VEHICLE_NOT_VERIFIED`)
-- [ ] For `sim.driver1`–`3`: `drivers.kyc_status='approved'`; 5 identity `driver_documents`
-      approved; one `vehicles` row each (`is_active=true`, category normal/luxury) with 5
-      approved vehicle documents; `account_status` as the backend requires
-- [ ] Record the exact SQL used in this file (below) so it can be re-run
+```sql
+BEGIN;
+WITH spec(email, plate, color, model, seats, category) AS (VALUES
+  ('sim.driver1@goride.test', 'SIM1001', 'White',  'Perodua Myvi',     4, 'normal'),
+  ('sim.driver2@goride.test', 'SIM2002', 'Silver', 'Toyota Innova',    7, 'normal'),
+  ('sim.driver3@goride.test', 'SIM3003', 'Black',  'Mercedes E-Class', 4, 'luxury'))
+INSERT INTO vehicles (driver_id, plate_number, color, model_name, seat_count, category, is_active)
+SELECT d.id, s.plate, s.color, s.model, s.seats, s.category, true
+FROM spec s JOIN drivers d ON d.email = s.email
+ON CONFLICT (plate_number) DO UPDATE SET is_active = true;
 
-### 2.2 API clients + types (port from go-ride-driver-app/src/api)
-- [ ] `driver-client`: `GET /driver/profile`, `PATCH /driver/online`, `PATCH /driver/pause`
-- [ ] `vehicles-client`: `GET /driver/vehicles`; `kyc-client`: `GET /driver/kyc/status`
-- [ ] `driver-trips-client`: `GET /current-trip`, `/stats`, `/earnings`, `/online-time`; `POST /job-offers/{id}/accept`
-- [ ] `location-client`: `POST /location/update-location` (strict body — omit unknown/undefined keys)
-- [ ] Types: Vehicle, KycStatusResponse, DocumentResponse, Earnings/OnlineTime, job offer message (from `websocket-gateway/internal/ws/protocol.go`)
+UPDATE drivers SET kyc_status = 'approved', updated_at = now() WHERE email LIKE 'sim.driver%@goride.test';
 
-### 2.3 Gating logic (port with tests)
-- [ ] `features/presence/gating.ts` (`deriveOnlineGate`, identity checked before vehicle — matches backend 403 precedence)
-- [ ] `features/kyc/verification-summary.ts` (`summariseTrack`, `describeVerificationBlockers`)
-- [ ] Port their `.test.ts` files to Vitest
+INSERT INTO driver_documents (driver_id, vehicle_id, document_type, file_url, status, is_current)
+SELECT d.id, NULL, t, 'sim://placeholder/' || t, 'approved', true
+FROM drivers d CROSS JOIN unnest(ARRAY['selfie','govt_id_front','govt_id_back','driving_license_front','driving_license_back']) AS t
+WHERE d.email LIKE 'sim.driver%@goride.test'
+  AND NOT EXISTS (SELECT 1 FROM driver_documents x WHERE x.driver_id = d.id AND x.document_type = t AND x.is_current);
 
-### 2.4 Screens (match `Driver App.dc.html`, search `data-screen-label`)
-- [ ] D06 Go online (home): map with own position, profile chip, stat cards (today's earnings / online time), blocker card, `Go online` (disabled + route to blocker when gated)
-- [ ] D07 Confirm online sheet: active vehicle card, "All 5 documents approved" strip, location note, `Switch vehicle` / `Go online` — going online **always** passes through here
-- [ ] D03 Menu: header, verification + vehicles rows with counts, log out
-- [ ] Online state: header/pill, `Pause` / resume, `Go offline`
-- [ ] Replace the Phase 0 signed-in placeholder with D06
-
-### 2.5 Location broadcasting
-- [ ] Port `location-broadcaster.ts` (10s movement throttle, 25m min distance, 60s heartbeat) + tests, reading from the location store instead of expo-location
-- [ ] Lifecycle: start on online, stop on offline/pause/logout/tab close
-- [ ] Log each ping as a `location` dev-log entry
-
-### 2.6 Job offers (D08) — new in web; the Expo driver app has no socket client yet
-- [ ] Offer store: `job_offer` → card with its own `expires_at` countdown; `offer_withdrawn` → removed/"taken"; expiry → dimmed "Expired"
-- [ ] Send `ack {job_offer_id, status: "seen"}` when a card renders (check the exact ack shape in `protocol.go` / `AckMessage`)
-- [ ] `Accept` → `POST /driver-trips/job-offers/{id}/accept`; 409/taken → "Taken by another driver"; success → current trip (Phase 4 screen, placeholder for now)
-- [ ] No decline button (backend has no reject endpoint); offers replay on reconnect, no polling
-
-### 2.7 Simulator + tests
-- [ ] Presence carries driver `online`/`paused`; simulator marker/list shows it
-- [ ] Unit tests: gating, broadcaster throttle, offer store (expiry, withdrawn, accept race)
-- [ ] Smoke: driver goes online → `driver_locations` row updates → curl a `request-cab` as a rider near the driver → offer card appears in the driver tab
-- [ ] Commit per sub-area; push; update this file
+INSERT INTO driver_documents (driver_id, vehicle_id, document_type, file_url, status, is_current)
+SELECT d.id, v.id, t, 'sim://placeholder/' || t, 'approved', true
+FROM drivers d JOIN vehicles v ON v.driver_id = d.id AND v.is_active
+CROSS JOIN unnest(ARRAY['vehicle_registration','vehicle_photo_front','vehicle_photo_back','vehicle_photo_side','vehicle_number_plate']) AS t
+WHERE d.email LIKE 'sim.driver%@goride.test'
+  AND NOT EXISTS (SELECT 1 FROM driver_documents x WHERE x.vehicle_id = v.id AND x.document_type = t AND x.is_current);
+COMMIT;
+```
+Run with `docker exec -i go-ride-postgres psql -U postgres -d go_ride -v ON_ERROR_STOP=1 < file.sql`.
+</details>
 
 ---
+
+## Next: Phase 3 — Rider booking happy path
+
+**Done when:** a rider books through the web screens (R01 → R04), a driver tab placed nearby
+gets the offer and accepts, and the rider sees R05 with the driver, vehicle, plate, start PIN
+and the driver's position moving when the simulator moves the driver.
+
+### 3.0 Prep
+- [ ] Render R01–R07 with `npm run handoff:shots -- "../design_handoff_go_ride/Ride Booking Flow v2.dc.html" "01 Where to" …`
+- [ ] Decide the currency question (see Known issues: backend picks the USD fare config)
+
+### 3.1 Rider API layer (`features/rider/api`)
+- [ ] Types from cab-request-handler (`fareQuote`, `createCabRequestResponse`, `currentTripResponse`, cancel response) and websocket-gateway rider messages (`ride_assigned`, `driver_location`, `trip_started`, `trip_ended`, `trip_completed`, `trip_cancelled`)
+- [ ] Clients: `POST /cab/fare-estimate` (returns `quotes[]` for RIDE / RIDE_XL / RIDE_PREMIUM, each with `expires_at`), `POST /cab/request-cab` (`{fare_id}` + `Idempotency-Key` header), `POST /cab/request-cab/{id}/cancel` (reason ∈ rider_absent, rider_requested, vehicle_problem, unsafe_destination, other), `GET /cab/current-trip`, `GET /cab/trips`, `POST /cab/trips/{id}/rate`
+- [ ] Places: `GET /places/autocomplete?input&lat&lng`, `GET /places/:place_id`, `GET /places/reverse-geocode` (auth required, either role)
+
+### 3.2 Rider runtime
+- [ ] Trip state store (`search_started → offered → driver_accepted → assigned → in_progress → completed/cancelled`) fed by ws messages; on reload/reconnect, rebuild from `GET /cab/current-trip` (ongoing trip reports its request under `ongoing_trip`)
+- [ ] Rider's own position = pickup default; simulator activity (searching / driver on the way / on trip)
+
+### 3.3 Screens (match `Ride Booking Flow v2.dc.html`; rider theme)
+- [ ] R01 Where to: lilac header, search field with `Later` chip, promo strip, sheet with Recent / Suggested / Saved (Recent from `/cab/trips`, Suggested from autocomplete), "Choose on map" pill
+- [ ] R02 Confirm pickup: full-bleed map, pickup pill, pin with "Nearest entrance" callout, reverse-geocoded place, confirm
+- [ ] R03 Pick a ride: three tiers from fare-estimate with fare breakdown and quote validity; surge shown but no surge UI
+- [ ] R04 Finding a driver: request-cab, searching animation, cancel (reason required)
+- [ ] R05 Driver on the way: driver + vehicle + plate, start PIN, live `driver_location` on the map with distance/ETA
+- [ ] Replace the rider signed-in placeholder with R01
+
+### 3.4 Simulator + tests
+- [ ] Simulator draws each rider's pickup/drop-off pins and the assigned driver link
+- [ ] Unit tests: trip state reducer, quote expiry, idempotency key reuse on retry
+- [ ] Smoke: rider books via UI → driver accepts → rider sees R05 + PIN → moving the driver in the simulator updates the rider's map
+- [ ] Commit per sub-area, push, update this file
 
 ## Decisions log
 
@@ -103,6 +130,11 @@ request made nearby (via curl until Phase 3) shows up as an offer card in that d
 | 2026-09-25 | Test data via direct local-DB edits, no seed script | User preference |
 | 2026-09-25 | Repo private on GitHub (other go-ride repos are public) | Publishing can't be undone; flip with `gh repo edit … --visibility public` |
 | 2026-09-25 | Rider login reuses the D01 layout in the rider theme | Handoff has no rider sign-in screen |
+| 2026-09-25 | Web broadcaster adds a 5s evaluation tick to the app's rules | Simulated drivers produce no new fixes while parked; heartbeat must still fire |
+| 2026-09-25 | D07 checks "tab has a location" instead of OS permission | Web equivalent of the permission gate; dispatch can't match a driver with no location |
+| 2026-09-25 | D06 online state (status, pause, offers waiting) designed in-app | Handoff only designs the offline state |
+| 2026-09-25 | D08 place names via backend reverse-geocode; no category pill | Offer message has only coordinates and no service type |
+| 2026-09-25 | Menu rows for verification/vehicles/profile shown but not navigable | Those screens are Phase 6 |
 
 ## Gotchas learned
 
@@ -116,7 +148,20 @@ request made nearby (via curl until Phase 3) shows up as an offer card in that d
 - **Error shapes:** go-ride-backend returns `{code, message}`, kafka-consumers services
   `{error, message}` — the HTTP client normalises both.
 - **StrictMode** opens and immediately closes a first websocket in dev — harmless.
-- **Duplicate tab** copies `sessionStorage` in both Chrome and Firefox — handled by the guard.
+- **Duplicate tab** copies `sessionStorage` in both Chrome and Firefox — handled by the guard,
+  which must defend the id from the first moment of boot (fixed in `5ed6ef4`).
+- **Rider cancel reason is an enum** (`rider_absent|rider_requested|vehicle_problem|unsafe_destination|other`);
+  free text goes in `note`. A bad reason is a 400 and the trip stays assigned — which then
+  keeps that driver out of dispatch (drivers with an ongoing trip are excluded).
+- **`GET /cab/current-trip`**: an ongoing trip's request id is under `ongoing_trip`, not `trip_request`.
+- **`offer_withdrawn` has no job_offer_id** — it names the request; mark every card for that request.
+- **Ack shape:** `{type: "ack", job_offer_id, status: "seen"}`; anything else is ignored by the gateway.
+- **StrictMode + one-shot effects:** read "already done" flags from the store inside the effect,
+  not from props — the re-run sees a stale prop (caused a double ack).
+- **zsh:** don't name a shell variable `path` — it's tied to `PATH`.
+- **Dispatch eligibility** (trip-dispatch-worker): `is_online AND NOT is_paused`, active vehicle,
+  location `recorded_at` within 300s, within 20→30 km, tier (RIDE any / RIDE_XL ≥6 seats /
+  RIDE_PREMIUM luxury), no ongoing trip, didn't cancel this request before.
 
 ## Environment checkpoint
 
@@ -125,7 +170,9 @@ request made nearby (via curl until Phase 3) shows up as an offer card in that d
   and `location-consumers`; logs in `../logs/`. Infra: `go-ride-infra/local` docker compose.
   If Kafka/Postgres go down, the consumers exit — restart the stack.
 - Test accounts (password `password123`): riders `sim.rider1|2@goride.test`, drivers
-  `sim.driver1|2|3@goride.test`. Drivers are **not** KYC-approved yet (Phase 2.1).
+  `sim.driver1|2|3@goride.test` — drivers are KYC-approved with active vehicles (Phase 2.1).
+- Smoke test resets driver1 offline and cancels rider1's active trip before and after it runs.
+- `npm run handoff:shots -- <dc.html> "<screen label>"…` renders design screens for comparison.
 - Maps key: GCP project `go-ride-dev-504212`, key id `52b9aa5c-f166-48c9-ae36-32b1b4fb8915`,
   value only in `.env` (gitignored).
 
@@ -133,3 +180,6 @@ request made nearby (via curl until Phase 3) shows up as an offer card in that d
 
 - `location-consumers` health endpoint on `:8085` didn't answer (the consumer itself is running) — check its config if needed.
 - Home page and simulator use a few literal rider/driver hex colours outside the themed phone frame.
+- **Currency:** fare-estimate returns USD — `fare_configs` has both USD and MYR rows and the backend
+  picks USD. The design assumes RM (MYR). UI shows whatever the backend sends; decide in Phase 3.0.
+- D04/D05 screens (verification, vehicles) and D09–D11 not built yet (Phases 4 and 6).
