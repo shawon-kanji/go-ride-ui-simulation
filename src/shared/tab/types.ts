@@ -1,3 +1,5 @@
+import type { GeoPoint, LocationSource } from '../location/location-store';
+
 export type Role = 'rider' | 'driver';
 
 export type WsState = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
@@ -11,6 +13,8 @@ export interface TabPresence {
   name: string | null;
   email: string | null;
   wsState: WsState;
+  location: GeoPoint | null;
+  locationSource: LocationSource;
   sentAt: number;
 }
 
@@ -38,4 +42,6 @@ export type BusMessage =
   | { type: 'presence'; presence: TabPresence }
   | { type: 'bye'; tabId: string }
   | { type: 'whois' }
+  // Simulator → one tab: move its simulated GPS.
+  | { type: 'set-location'; tabId: string; lat: number; lng: number }
   | { type: 'log'; entry: DevLogEntry };

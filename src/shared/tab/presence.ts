@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router';
 
+import { useLocationStore } from '../location/location-store';
 import { useRealtimeStore } from '../realtime/use-realtime';
 import { sessionStores } from '../session/session-store';
 import { postBus, subscribeBus } from './bus';
@@ -16,6 +17,8 @@ export function useTabPresence(role: Role): void {
   const { pathname } = useLocation();
   const user = sessionStores[role]((s) => s.user);
   const wsState = useRealtimeStore((s) => s.wsState);
+  const location = useLocationStore((s) => s.position);
+  const locationSource = useLocationStore((s) => s.source);
 
   useEffect(() => {
     const announce = () => {
@@ -27,6 +30,8 @@ export function useTabPresence(role: Role): void {
         name: user ? `${user.first_name} ${user.last_name}`.trim() : null,
         email: user?.email ?? null,
         wsState,
+        location,
+        locationSource,
         sentAt: Date.now(),
       };
       postBus({ type: 'presence', presence });
@@ -41,7 +46,7 @@ export function useTabPresence(role: Role): void {
       clearInterval(interval);
       unsubscribe();
     };
-  }, [role, pathname, user, wsState]);
+  }, [role, pathname, user, wsState, location, locationSource]);
 
   useEffect(() => {
     const sayBye = () => postBus({ type: 'bye', tabId: getTabId() });

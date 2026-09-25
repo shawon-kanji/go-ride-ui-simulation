@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation } from 'react-router';
 
 import { setLogRole } from '../shared/devlog/devlog-store';
 import { DevPanel } from '../shared/devlog/DevPanel';
+import { useLocationProvider } from '../shared/location/use-location-provider';
 import { useRealtimeConnection } from '../shared/realtime/use-realtime';
 import { SESSION_ENDED_MESSAGE, sessionStores } from '../shared/session/session-store';
 import { useTabPresence } from '../shared/tab/presence';
@@ -11,8 +12,8 @@ import type { Role } from '../shared/tab/types';
 import { PhoneFrame } from '../shared/ui/PhoneFrame';
 
 // Layout for /user/* and /driver/*: the phone frame, the dev panel, and everything a
-// simulated device needs while it is open — websocket, presence on the simulator bus,
-// and signing out when the 60-minute token runs out.
+// simulated device needs while it is open — websocket, location, presence on the
+// simulator bus, and signing out when the 60-minute token runs out.
 
 function useExpireSessionAtTokenExpiry(role: Role): void {
   const expiresAt = sessionStores[role]((s) => s.tokenExpiresAt);
@@ -38,6 +39,7 @@ export function RoleShell({ role }: { role: Role }) {
   }, [role]);
 
   useRealtimeConnection(role);
+  useLocationProvider();
   useTabPresence(role);
   useExpireSessionAtTokenExpiry(role);
 

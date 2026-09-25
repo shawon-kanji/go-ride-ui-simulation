@@ -1,7 +1,8 @@
-import { LogOut } from 'lucide-react';
+import { LogOut, MapPin } from 'lucide-react';
 
 import { logout } from '../features/auth/api';
 import { SessionExpiryBanner } from '../features/auth/SessionExpiryBanner';
+import { formatPoint, useLocationStore } from '../shared/location/location-store';
 import { sessionStores } from '../shared/session/session-store';
 import type { Role } from '../shared/tab/types';
 import { Button } from '../shared/ui/Button';
@@ -17,6 +18,8 @@ const NEXT_UP: Record<Role, string> = {
 
 export function SignedInPlaceholder({ role }: { role: Role }) {
   const user = sessionStores[role]((s) => s.user);
+  const position = useLocationStore((s) => s.position);
+  const source = useLocationStore((s) => s.source);
   const initials = user ? `${user.first_name.charAt(0)}${user.last_name.charAt(0)}`.toUpperCase() : '';
 
   return (
@@ -40,6 +43,18 @@ export function SignedInPlaceholder({ role }: { role: Role }) {
         <Card>
           <p className="text-[12px] font-bold uppercase tracking-[0.1em] text-neutral-500">Signed in</p>
           <p className="mt-2 text-[15px] text-neutral-700">{NEXT_UP[role]}</p>
+        </Card>
+        <Card>
+          <p className="text-[12px] font-bold uppercase tracking-[0.1em] text-neutral-500">Current location</p>
+          <p className="mt-2 flex items-center gap-2 text-[15px] text-neutral-700">
+            <MapPin size={18} className="shrink-0 text-primary-600" />
+            <span data-testid="current-location" className="font-mono text-[14px]">
+              {position ? formatPoint(position) : 'Not placed yet'}
+            </span>
+          </p>
+          <p className="mt-1 text-[13px] text-neutral-500">
+            {source === 'simulated' ? 'Set from the simulator' : 'From this browser’s GPS'}
+          </p>
         </Card>
         <div className="mt-auto">
           <Button

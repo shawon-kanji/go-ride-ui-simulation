@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import { formatPoint, useLocationStore, type LocationSource } from '../location/location-store';
 import { useRealtimeStore } from '../realtime/use-realtime';
 import { sessionStores } from '../session/session-store';
 import { getTabId, shortTabId } from '../tab/tab-identity';
@@ -126,7 +127,9 @@ export function DevPanel({ role }: { role: Role }) {
           {wsState}
         </dd>
         <dt className="text-neutral-500">Location</dt>
-        <dd className="text-neutral-400">set by the simulator (Phase 1)</dd>
+        <dd>
+          <LocationRow />
+        </dd>
       </dl>
 
       <div className="flex items-center gap-1.5 border-b border-neutral-200 px-4 py-2">
@@ -152,6 +155,43 @@ export function DevPanel({ role }: { role: Role }) {
         ))}
       </ol>
     </aside>
+  );
+}
+
+const SOURCES: { id: LocationSource; label: string }[] = [
+  { id: 'simulated', label: 'Simulated' },
+  { id: 'browser', label: 'Browser GPS' },
+];
+
+function LocationRow() {
+  const source = useLocationStore((s) => s.source);
+  const position = useLocationStore((s) => s.position);
+  const browserError = useLocationStore((s) => s.browserError);
+  const setSource = useLocationStore((s) => s.setSource);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="inline-flex self-start rounded-pill bg-neutral-100 p-0.5">
+        {SOURCES.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => setSource(option.id)}
+            className={`rounded-pill px-2.5 py-0.5 text-[12px] font-semibold ${source === option.id ? 'bg-white text-neutral-900 shadow-sm' : 'text-neutral-500'}`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {position ? (
+        <span className="font-mono text-[12px]">{formatPoint(position)}</span>
+      ) : (
+        <span className="text-neutral-400">
+          {source === 'simulated' ? 'Not placed — select this tab in the simulator and click the map' : 'Waiting for a fix…'}
+        </span>
+      )}
+      {browserError && source === 'browser' && <span className="text-danger-600">{browserError}</span>}
+    </div>
   );
 }
 
