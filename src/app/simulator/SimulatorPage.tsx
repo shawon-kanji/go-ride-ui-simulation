@@ -1,106 +1,131 @@
 import { Car, Truck } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
-import { STALE_AFTER_MS, useTabRegistry, useTabRegistryFeed } from '../../features/simulator/tab-registry';
-import type { WsState } from '../../shared/tab/types';
+import { moveTab } from '../../features/simulator/commands';
+import { SimulatorMap } from '../../features/simulator/SimulatorMap';
+import { TabList } from '../../features/simulator/TabList';
+import {
+  STALE_AFTER_MS,
+  useTabRegistry,
+  useTabRegistryFeed,
+  type RegisteredTab,
+} from '../../features/simulator/tab-registry';
+import type { GeoPoint } from '../../shared/location/location-store';
+import { ErrorBoundary } from '../../shared/ui/ErrorBoundary';
 
-// Phase 0: a live list of open tabs, to prove the bus. The map, location control and
-// event timeline arrive in Phases 1 and 5.
+// Full-screen simulator: open tabs on the left, the map on the right. Select a tab and
+// click the map (or drag its marker) to move that tab's simulated GPS.
 
-const WS_DOT: Record<WsState, string> = {
-  idle: 'bg-neutral-300',
-  connecting: 'bg-warning-500',
-  reconnecting: 'bg-warning-500',
-  open: 'bg-success-500',
-  closed: 'bg-danger-500',
-};
+const HAS_MAPS_KEY = Boolean(import.meta.env.VITE_GOOGLE_MAPS_API_KEY);
 
 export function SimulatorPage() {
   useTabRegistryFeed();
-  const tabs = Object.values(useTabRegistry((s) => s.tabs));
+  const tabsById = useTabRegistry((s) => s.tabs);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [focus, setFocus] = useState<GeoPoint | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     document.title = 'Go Ride · Simulator';
     const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('keydown', onKey);
+    };
   }, []);
 
-  const sorted = [...tabs].sort((a, b) => (a.role ?? '').localeCompare(b.role ?? '') || a.tabId.localeCompare(b.tabId));
+  const tabs = useMemo(
+    () =>
+      Object.values(tabsById).sort(
+        (a, b) => (a.name ?? '~').localeCompare(b.name ?? '~') || a.tabId.localeCompare(b.tabId),
+      ),
+    [tabsById],
+  );
+  const selected = selectedId ? (tabsById[selectedId] ?? null) : null;
+  const isStale = useCallback((tab: RegisteredTab) => now - tab.lastSeen > STALE_AFTER_MS, [now]);
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-10">
-      <Link to="/" className="text-[13px] font-semibold text-neutral-500 hover:text-neutral-800">
-        ← Go Ride simulator
-      </Link>
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[24px] font-extrabold tracking-[-0.02em]">Simulator</h1>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => window.open('/user', '_blank')}
-            className="flex items-center gap-2 rounded-control bg-[#00a04a] px-3 py-2 text-[13px] font-bold text-white"
-          >
-            <Car size={16} /> Open rider tab
-          </button>
-          <button
-            type="button"
-            onClick={() => window.open('/driver', '_blank')}
-            className="flex items-center gap-2 rounded-control bg-primary-500 px-3 py-2 text-[13px] font-bold text-white"
-          >
-            <Truck size={16} /> Open driver tab
-          </button>
+    <div className="flex h-dvh overflow-hidden">
+      <aside className="flex w-[360px] shrink-0 flex-col border-r border-neutral-200 bg-neutral-50">
+        <div className="px-5 pt-5 pb-4">
+          <Link to="/" className="text-[13px] font-semibold text-neutral-500 hover:text-neutral-800">
+            ← Go Ride
+          </Link>
+          <h1 className="mt-1 text-[24px] font-extrabold tracking-[-0.02em]">Simulator</h1>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => window.open('/user', '_blank')}
+              className="flex flex-1 items-center justify-center gap-2 rounded-control bg-[#00a04a] px-3 py-2 text-[13px] font-bold text-white hover:bg-[#008a3f]"
+            >
+              <Car size={16} /> Open rider tab
+            </button>
+            <button
+              type="button"
+              onClick={() => window.open('/driver', '_blank')}
+              className="flex flex-1 items-center justify-center gap-2 rounded-control bg-primary-500 px-3 py-2 text-[13px] font-bold text-white hover:bg-primary-600"
+            >
+              <Truck size={16} /> Open driver tab
+            </button>
+          </div>
         </div>
-      </div>
+        <div className="flex-1 overflow-y-auto">
+          <TabList
+            tabs={tabs}
+            selectedId={selectedId}
+            isStale={isStale}
+            onSelect={setSelectedId}
+            onLocate={(tab) => {
+              setSelectedId(tab.tabId);
+              if (tab.location) setFocus({ ...tab.location });
+            }}
+          />
+        </div>
+      </aside>
 
-      <section className="mt-6 overflow-hidden rounded-card bg-white shadow-sm">
-        <div className="border-b border-neutral-200 px-4 py-3 text-[12px] font-bold uppercase tracking-[0.1em] text-neutral-500">
-          Open tabs · {tabs.length}
-        </div>
-        {sorted.length === 0 ? (
-          <p className="px-4 py-10 text-center text-[14px] text-neutral-500">
-            No rider or driver tabs open yet. Open one with the buttons above.
-          </p>
+      <main className="relative flex-1">
+        {HAS_MAPS_KEY ? (
+          <ErrorBoundary
+            fallback={(error) => (
+              <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-neutral-600">
+                <p className="font-bold text-neutral-900">The map failed to load.</p>
+                <p className="max-w-md text-[14px]">
+                  {error.message}. Check the browser console for a Google Maps error — a rejected key shows up as
+                  RefererNotAllowedMapError or InvalidKeyMapError.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  className="rounded-control bg-neutral-900 px-4 py-2 text-[13px] font-bold text-white"
+                >
+                  Reload
+                </button>
+              </div>
+            )}
+          >
+            <SimulatorMap
+              tabs={tabs}
+              selected={selected}
+              focus={focus}
+              isStale={isStale}
+              onSelect={setSelectedId}
+              onMove={moveTab}
+            />
+          </ErrorBoundary>
         ) : (
-          <table className="w-full text-left text-[14px]">
-            <thead className="text-[12px] text-neutral-500">
-              <tr>
-                <th className="px-4 py-2 font-semibold">Tab</th>
-                <th className="px-4 py-2 font-semibold">Role</th>
-                <th className="px-4 py-2 font-semibold">User</th>
-                <th className="px-4 py-2 font-semibold">Screen</th>
-                <th className="px-4 py-2 font-semibold">Websocket</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-100">
-              {sorted.map((tab) => {
-                const stale = now - tab.lastSeen > STALE_AFTER_MS;
-                return (
-                  <tr key={tab.tabId} className={stale ? 'opacity-40' : ''}>
-                    <td className="px-4 py-2 font-mono text-[12px]">{tab.tabId.slice(0, 4)}</td>
-                    <td className="px-4 py-2">
-                      <span
-                        className={`rounded-pill px-2 py-0.5 text-[12px] font-bold ${tab.role === 'rider' ? 'bg-[#e8f6ee] text-[#04562a]' : 'bg-primary-50 text-primary-700'}`}
-                      >
-                        {tab.role}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2">{tab.email ?? <span className="text-neutral-400">signed out</span>}</td>
-                    <td className="px-4 py-2 font-mono text-[12px] text-neutral-500">{tab.path}</td>
-                    <td className="px-4 py-2">
-                      <span className="flex items-center gap-2">
-                        <span className={`h-2 w-2 rounded-full ${WS_DOT[tab.wsState]}`} />
-                        {stale ? 'stale' : tab.wsState}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="flex h-full items-center justify-center p-8 text-center text-neutral-600">
+            <p>
+              Set <code className="font-mono">VITE_GOOGLE_MAPS_API_KEY</code> in <code>.env</code> and restart{' '}
+              <code>npm run dev</code> to load the map.
+            </p>
+          </div>
         )}
-      </section>
-    </main>
+      </main>
+    </div>
   );
 }

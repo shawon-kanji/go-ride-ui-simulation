@@ -113,6 +113,43 @@ try {
       () => check('simulator lists every signed-in tab', true),
       () => check('simulator lists every signed-in tab', false),
     );
+  // 6b. Phase 1: select driver 1 in the simulator, click the map, and the driver's tab
+  //     must report the new simulated position within a second.
+  const mapsErrors = [];
+  sim.on('console', (msg) => {
+    if (/Google Maps JavaScript API (error|warning)|InvalidKey|RefererNotAllowed|ApiNotActivated/i.test(msg.text())) {
+      mapsErrors.push(msg.text());
+    }
+  });
+  const d1TabId = await tabId(d1);
+  await sim.waitForSelector('.gm-style', { timeout: 15_000 }).then(
+    () => check('simulator map loads', true),
+    () => check('simulator map loads', false),
+  );
+  await sim.click(`[data-testid="tab-row-${d1TabId}"]`);
+  const mapBox = await (await sim.$('.gm-style')).boundingBox();
+  await sim.mouse.click(mapBox.x + mapBox.width * 0.4, mapBox.y + mapBox.height * 0.55);
+  const clickedAt = Date.now();
+  await d1
+    .waitForFunction(
+      () => /^-?\d+\.\d{5}, -?\d+\.\d{5}$/.test(document.querySelector('[data-testid="current-location"]')?.textContent ?? ''),
+      { timeout: 1_000, polling: 50 },
+    )
+    .then(
+      () => check('map click moves the driver tab within 1s', true, `${Date.now() - clickedAt}ms`),
+      () => check('map click moves the driver tab within 1s', false),
+    );
+  const placed = await d1.$eval('[data-testid="current-location"]', (el) => el.textContent);
+  await sim
+    .waitForFunction((coords) => document.body.textContent.includes(coords), { timeout: 5_000 }, placed)
+    .then(
+      () => check('simulator shows the confirmed position', true, placed),
+      () => check('simulator shows the confirmed position', false, placed),
+    );
+  const d1Reloaded = await d1.reload().then(() => d1.waitForSelector('[data-testid="current-location"]'));
+  check('simulated position survives a reload', (await d1Reloaded.evaluate((el) => el.textContent)) === placed);
+  check('no Google Maps key errors', mapsErrors.length === 0, mapsErrors[0] ?? '');
+  await d1.screenshot({ path: `${OUT}/05a-driver-placed.png` });
   await sim.screenshot({ path: `${OUT}/05-simulator.png` });
 
   // 7. "Duplicate tab": a new tab that boots with a copy of tab 1's sessionStorage.

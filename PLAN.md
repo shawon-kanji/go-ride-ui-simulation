@@ -303,7 +303,7 @@ Each phase ends with something you can run and click through.
 - **Done when:** two tabs can each log in as different users, reload keeps each login, and
   the health page is green.
 
-### Phase 1 — Simulator skeleton + location provider
+### Phase 1 — Simulator skeleton + location provider ✅ (2026-09-25; map click → tab in <20ms)
 - Simulator route with map, tab list, click-to-place, drag markers.
 - `LocationProvider` (simulated/browser) in both apps; dev panel.
 - **Done when:** moving a marker in the simulator updates the tab's position within a second.
@@ -352,7 +352,9 @@ Each phase ends with something you can run and click through.
 1. **Folder:** stays `go-ride-ui-simulation/`.
 2. **Map key — done.** Browser key "Go Ride Simulator Browser Key (localhost)" in GCP project
    `go-ride-dev-504212` (key id `52b9aa5c-f166-48c9-ae36-32b1b4fb8915`). Referrers
-   `http://localhost:*/*` and `http://127.0.0.1:*/*`; APIs Maps JavaScript, Directions,
+   `http://localhost:5173/*`, `http://127.0.0.1:5173/*` (explicit ports — Google rejected
+   the dev server under the `localhost:*` wildcard alone), plus `http://localhost:*/*`,
+   `http://127.0.0.1:*/*`, `http://localhost/*`; APIs Maps JavaScript, Directions,
    Routes. Stored in `go-ride-ui-simulation/.env` as `VITE_GOOGLE_MAPS_API_KEY` (gitignored).
    Places autocomplete, place details and reverse geocode go through the backend's
    `/api/v1/places` proxy, so the browser key doesn't need Places.

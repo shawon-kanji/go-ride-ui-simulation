@@ -8,13 +8,21 @@ phases.
 |---|---|
 | `/user` | Rider app (phone frame, rider theme) |
 | `/driver` | Driver app (phone frame, driver theme) |
-| `/simulator` | Every open tab, and (from Phase 1) their locations on a map |
+| `/simulator` | Every open tab on a Google map — select a tab and click the map (or drag its marker) to move its GPS |
 | `/health` | Pings every Go service through the dev proxy |
 
 Every tab is its own device: its own login (in `sessionStorage`), its own websocket
 `device_id`. Open as many rider and driver tabs as you need in one browser. Reloading keeps
 a tab signed in; closing it signs it out. A tab made with the browser's "Duplicate tab"
 starts signed out as a new device.
+
+## Location
+
+Each tab's position comes from its location source, switchable in the dev panel:
+
+- **Simulated** (default): set from the simulator. Select a tab in the simulator's list,
+  then click the map, or drag its marker. The position survives a reload of that tab.
+- **Browser GPS**: `navigator.geolocation`. The simulator shows these tabs but can't move them.
 
 ## Run
 

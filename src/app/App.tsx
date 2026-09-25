@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { APIProvider } from '@vis.gl/react-google-maps';
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router';
 
 import { LoginScreen } from '../features/auth/LoginScreen';
@@ -51,7 +52,10 @@ const router = createBrowserRouter([
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      {/* Loads the Maps JS API once for every page that shows a map. */}
+      <APIProvider apiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? ''}>
+        <RouterProvider router={router} />
+      </APIProvider>
     </QueryClientProvider>
   );
 }

@@ -8,8 +8,16 @@ import type { TabPresence } from '../../shared/tab/types';
 
 export const STALE_AFTER_MS = 6_000;
 
+export type RegisteredTab = TabPresence & { lastSeen: number };
+
+/** Short on-map name: first name, or role + short tab id for a signed-out tab. */
+export function actorLabel(tab: RegisteredTab): string {
+  if (tab.name) return tab.name.split(' ')[0];
+  return `${tab.role ?? 'tab'} ${tab.tabId.slice(0, 4)}`;
+}
+
 interface TabRegistryState {
-  tabs: Record<string, TabPresence & { lastSeen: number }>;
+  tabs: Record<string, RegisteredTab>;
 }
 
 export const useTabRegistry = create<TabRegistryState>(() => ({ tabs: {} }));
