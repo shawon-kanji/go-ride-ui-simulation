@@ -1,4 +1,4 @@
-// Phase 0 smoke test in the locally installed Firefox (headless, via WebDriver BiDi).
+// End-to-end smoke test in the locally installed Firefox (headless, via WebDriver BiDi).
 //
 //   npm run dev            # in another terminal
 //   npm run smoke:firefox  # SMOKE_HEADFUL=1 to watch it
@@ -6,8 +6,13 @@
 // Checks: per-tab sessions (two driver tabs signed in as different drivers in one
 // browser), reload keeps a tab signed in, a duplicated tab starts signed out as a new
 // device, websockets open for every tab, and the simulator sees every tab on the bus.
-// Screenshots go to SMOKE_OUT (default ./test-results/smoke).
+// Phase 1: simulator map click moves a tab. Phase 2: a driver goes online (D06 → D07),
+// location pings reach driver_locations, a rider request nearby (made over HTTP until
+// the rider screens exist) becomes an offer card, the seen-ack lands, Accept wins.
+// Needs the Go stack and the go-ride-postgres container. Screenshots go to SMOKE_OUT
+// (default ./test-results/smoke).
 
+import { execFileSync } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import puppeteer from 'puppeteer-core';
 
@@ -20,6 +25,11 @@ const ACCOUNTS = {
   driver2: process.env.SMOKE_DRIVER2 ?? 'sim.driver2@goride.test',
   rider1: process.env.SMOKE_RIDER1 ?? 'sim.rider1@goride.test',
 };
+
+// Text that only appears once a tab is signed in: the driver home's stat card, the
+// rider's temporary signed-in screen.
+const DRIVER_HOME = 'Online time';
+const RIDER_HOME = 'Signed in';
 
 const results = [];
 function check(name, ok, detail = '') {
@@ -39,8 +49,60 @@ async function signIn(page, path, email) {
   await page.type('input[type=email]', email);
   await page.type('input[type=password]', PASSWORD);
   await page.click('button[type=submit]');
-  await waitForText(page, 'Signed in');
+  await waitForText(page, path.startsWith('/driver') ? DRIVER_HOME : RIDER_HOME);
 }
+
+function sql(query) {
+  return execFileSync('docker', ['exec', 'go-ride-postgres', 'psql', '-U', 'postgres', '-d', 'go_ride', '-At', '-c', query], {
+    encoding: 'utf8',
+  }).trim();
+}
+
+async function pollSql(query, predicate, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  let value = '';
+  while (Date.now() < deadline) {
+    value = sql(query);
+    if (predicate(value)) return value;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return value;
+}
+
+async function api(path, { method = 'GET', body, token, headers = {} } = {}) {
+  const response = await fetch(`${BASE}${path}`, {
+    method,
+    headers: {
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...headers,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await response.json().catch(() => undefined);
+  return { status: response.status, json };
+}
+
+async function apiLogin(role, email) {
+  const path = role === 'driver' ? '/api/v1/driver/auth/login' : '/api/v1/auth/login';
+  const { json } = await api(path, { method: 'POST', body: { email, password: PASSWORD } });
+  return json.access_token;
+}
+
+/** Leaves driver 1 offline and rider 1 with no active request, whatever a previous run did. */
+async function resetState() {
+  const driverToken = await apiLogin('driver', ACCOUNTS.driver1);
+  await api('/api/v1/driver/online', { method: 'PATCH', body: { is_online: false }, token: driverToken });
+  const riderToken = await apiLogin('rider', ACCOUNTS.rider1);
+  const { json: current } = await api('/api/v1/cab/current-trip', { token: riderToken });
+  // An ongoing trip reports its request under ongoing_trip; a search under trip_request.
+  const requestId = current?.ongoing_trip?.request_id ?? current?.trip_request?.request_id;
+  if (current?.has_active_request || current?.has_ongoing_trip) {
+    if (requestId) await api(`/api/v1/cab/request-cab/${requestId}/cancel`, { method: 'POST', body: { reason: 'other', note: 'smoke test cleanup' }, token: riderToken });
+  }
+}
+
+const buttonXPath = (label, scope = '') => `xpath/.${scope}//button[normalize-space()="${label}" and not(@disabled)]`;
 
 async function newPage(browser) {
   const page = await browser.newPage();
@@ -49,6 +111,7 @@ async function newPage(browser) {
 }
 
 await mkdir(OUT, { recursive: true });
+await resetState();
 const browser = await puppeteer.launch({
   browser: 'firefox',
   executablePath: FIREFOX,
@@ -84,7 +147,7 @@ try {
   // 4. Reload keeps the tab signed in as the same driver and device.
   const idBefore = await tabId(d1);
   await d1.reload();
-  await waitForText(d1, 'Signed in');
+  await waitForText(d1, DRIVER_HOME);
   check('reload keeps driver 1 signed in', (await bodyText(d1)).includes(ACCOUNTS.driver1));
   check('reload keeps the same device id', (await tabId(d1)) === idBefore);
 
@@ -152,6 +215,78 @@ try {
   await d1.screenshot({ path: `${OUT}/05a-driver-placed.png` });
   await sim.screenshot({ path: `${OUT}/05-simulator.png` });
 
+  // 6c. Phase 2: driver 1 goes online through D06 → D07, location pings reach the
+  //     database, a rider request nearby becomes an offer card, Accept wins the trip.
+  let requestId = null;
+  let riderToken = null;
+  try {
+    const driverId = await d1.evaluate(() => JSON.parse(sessionStorage.getItem('goride:session:driver')).user.id);
+    await d1.bringToFront();
+    await (await d1.waitForSelector(buttonXPath('Go online'), { timeout: 10_000 })).click();
+    await d1.waitForSelector('[role=dialog]');
+    await d1.screenshot({ path: `${OUT}/06-driver-confirm-online.png` });
+    await (await d1.waitForSelector(buttonXPath('Go online', '//*[@role="dialog"]'))).click();
+    await waitForText(d1, "You're online").then(
+      () => check('driver goes online through the D07 confirmation', true),
+      () => check('driver goes online through the D07 confirmation', false),
+    );
+
+    const fresh = await pollSql(
+      `select count(*) from driver_locations where driver_id = '${driverId}' and recorded_at > now() - interval '1 minute'`,
+      (value) => Number(value) > 0,
+    );
+    check('location ping reaches driver_locations', Number(fresh) > 0, `${fresh} fresh row(s)`);
+    await d1.screenshot({ path: `${OUT}/06-driver-online.png` });
+
+    // Rider 1 books a ride starting ~200m from the driver (HTTP until Phase 3's screens).
+    const where = await d1.evaluate(() => JSON.parse(sessionStorage.getItem('goride:location')).simulated);
+    riderToken = await apiLogin('rider', ACCOUNTS.rider1);
+    const estimate = await api('/api/v1/cab/fare-estimate', {
+      method: 'POST',
+      token: riderToken,
+      body: { pickup_lat: where.lat + 0.0015, pickup_lng: where.lng + 0.001, dropoff_lat: where.lat + 0.025, dropoff_lng: where.lng + 0.02 },
+    });
+    const quote = estimate.json?.quotes?.find((q) => q.service_type === 'RIDE');
+    const booked = await api('/api/v1/cab/request-cab', {
+      method: 'POST',
+      token: riderToken,
+      headers: { 'Idempotency-Key': `smoke-${Date.now()}` },
+      body: { fare_id: quote?.fare_id },
+    });
+    requestId = booked.json?.request_id ?? null;
+    check('rider request is accepted by cab-request-handler', booked.status < 300 && !!requestId, `HTTP ${booked.status}`);
+
+    const bookedAt = Date.now();
+    await d1.waitForSelector('[data-testid="offer-card"][data-state="live"]', { timeout: 30_000 }).then(
+      () => check('offer card appears in the driver tab', true, `${Date.now() - bookedAt}ms after booking`),
+      () => check('offer card appears in the driver tab', false),
+    );
+    check('driver tab opens D08 on arrival', d1.url().endsWith('/driver/offers'), d1.url());
+    const delivery = await pollSql(
+      `select delivery_status from driver_job_offers where driver_id = '${driverId}' order by created_at desc limit 1`,
+      (value) => value === 'seen',
+      8_000,
+    );
+    check('seen-ack is recorded by the gateway', delivery === 'seen', delivery);
+    await new Promise((resolve) => setTimeout(resolve, 1_500)); // let place names load
+    await d1.screenshot({ path: `${OUT}/07-driver-offers.png` });
+
+    await (await d1.waitForSelector(buttonXPath('Accept', '//article[@data-testid="offer-card"]'))).click();
+    await waitForText(d1, 'Trip assigned').then(
+      () => check('accepting wins the trip', true),
+      () => check('accepting wins the trip', false),
+    );
+    await d1.screenshot({ path: `${OUT}/08-driver-trip-assigned.png` });
+  } finally {
+    // Cancel as the rider so driver 1 isn't left on a trip, then take them offline.
+    if (requestId && riderToken) {
+      await api(`/api/v1/cab/request-cab/${requestId}/cancel`, { method: 'POST', token: riderToken, body: { reason: 'other', note: 'smoke test cleanup' } });
+    }
+    const driverToken = await apiLogin('driver', ACCOUNTS.driver1);
+    await api('/api/v1/driver/online', { method: 'PATCH', body: { is_online: false }, token: driverToken });
+    await d1.goto(`${BASE}/driver`);
+  }
+
   // 7. "Duplicate tab": a new tab that boots with a copy of tab 1's sessionStorage.
   const copied = await d1.evaluate(() => JSON.stringify(Object.entries(sessionStorage)));
   const dup = await newPage(browser);
@@ -164,19 +299,25 @@ try {
   check('duplicated tab starts signed out', dup.url().endsWith('/driver/login'), dup.url());
   check('duplicated tab gets a new device id', (await tabId(dup)) !== idBefore);
   await d1.reload();
-  await waitForText(d1, 'Signed in');
+  await waitForText(d1, DRIVER_HOME);
   check('original tab is still signed in', (await bodyText(d1)).includes(ACCOUNTS.driver1));
 
   // 8. Logout signs out that tab only.
   await d2.bringToFront();
+  await d2.goto(`${BASE}/driver/menu`);
   const logout = await d2.waitForSelector('xpath/.//button[normalize-space()="Log out"]');
   await logout.click();
   await waitForText(d2, 'Welcome back');
   await d1.reload();
-  await waitForText(d1, 'Signed in');
+  await waitForText(d1, DRIVER_HOME);
   check('logging out tab 2 leaves tab 1 signed in', (await bodyText(d1)).includes(ACCOUNTS.driver1));
 } catch (error) {
-  check('smoke run finished without errors', false, String(error));
+  const where = String(error?.stack ?? '')
+    .split('\n')
+    .filter((line) => line.includes('smoke-firefox.mjs'))
+    .map((line) => line.replace(/.*smoke-firefox\.mjs:/, 'line '))
+    .join(' ← ');
+  check('smoke run finished without errors', false, `${error} ${where.trim()}`);
 } finally {
   await browser.close();
 }
