@@ -58,10 +58,43 @@ describe('claimTabIdentity', () => {
     const bus = listen();
 
     const newcomer = new BroadcastChannel('goride-sim');
-    newcomer.postMessage({ type: 'tab-claim', tabId: 'tab-b', bootId: 'boot-2' } satisfies BusMessage);
+    newcomer.postMessage({ type: 'tab-claim', tabId: 'tab-b', bootId: 'boot-2', bootedAt: Date.now() } satisfies BusMessage);
     await vi.waitFor(() => expect(bus.messages).toContainEqual({ type: 'tab-conflict', tabId: 'tab-b', bootId: 'boot-2' }));
 
     newcomer.close();
     bus.close();
+  });
+
+  it('defends its id while still booting, so a tab booting right after it resets', async () => {
+    window.sessionStorage.setItem('goride:tab-id', 'tab-c');
+    const tab = await loadTab();
+    const bus = listen();
+    const claiming = tab.claimTabIdentity(300);
+
+    // A duplicate boots 50ms into the original's own claim window.
+    const newcomer = new BroadcastChannel('goride-sim');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    newcomer.postMessage({ type: 'tab-claim', tabId: 'tab-c', bootId: 'late-boot', bootedAt: Date.now() + 1 } satisfies BusMessage);
+
+    await vi.waitFor(() => expect(bus.messages).toContainEqual({ type: 'tab-conflict', tabId: 'tab-c', bootId: 'late-boot' }));
+    expect(await claiming).toBe(false);
+    expect(tab.getTabId()).toBe('tab-c');
+    newcomer.close();
+    bus.close();
+  });
+
+  it('resets itself when an earlier-booted tab with the same id claims during its window', async () => {
+    window.sessionStorage.setItem('goride:tab-id', 'tab-d');
+    window.sessionStorage.setItem('goride:session:driver', '{"token":"t"}');
+    const tab = await loadTab();
+    const claiming = tab.claimTabIdentity(300);
+
+    const earlier = new BroadcastChannel('goride-sim');
+    earlier.postMessage({ type: 'tab-claim', tabId: 'tab-d', bootId: 'early-boot', bootedAt: Date.now() - 1_000 } satisfies BusMessage);
+
+    expect(await claiming).toBe(true);
+    expect(tab.getTabId()).not.toBe('tab-d');
+    expect(window.sessionStorage.getItem('goride:session:driver')).toBeNull();
+    earlier.close();
   });
 });
