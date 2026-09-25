@@ -3,14 +3,15 @@ import { useNavigate } from 'react-router';
 
 import { Card } from '../../../shared/ui/Card';
 import { Button } from '../../../shared/ui/Button';
-import { useCurrentTripQuery, usePlaceLabel } from '../api/queries';
+import { usePlaceLabel } from '../../../shared/places/places';
+import { useCurrentTripQuery } from '../api/queries';
 import { formatMoney } from '../format';
 
 // Temporary until Phase 4 builds D09 (trip + cash collection) and D10 (cancel).
 // Shows what driver-request-handler returned for the accepted offer.
 
 function Place({ lat, lng }: { lat: number; lng: number }) {
-  const { data } = usePlaceLabel(lat, lng);
+  const { data } = usePlaceLabel('driver', lat, lng);
   return <>{data ?? `${lat.toFixed(4)}, ${lng.toFixed(4)}`}</>;
 }
 

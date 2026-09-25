@@ -131,13 +131,6 @@ export interface CurrentTripResponse {
   trip_request?: TripRequestPayload;
 }
 
-export interface ReverseGeocodeResponse {
-  place_id: string;
-  formatted_address: string;
-  lat: number;
-  lng: number;
-}
-
 // ---- Websocket (driver socket) ----
 
 export interface JobOfferMessage {

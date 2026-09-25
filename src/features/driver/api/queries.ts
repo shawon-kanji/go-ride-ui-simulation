@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { driverClient, driverTripsClient, kycClient, placesClient, vehiclesClient } from './clients';
+import { driverClient, driverTripsClient, kycClient, vehiclesClient } from './clients';
 
 // Query keys are prefixed with 'driver' so a tab that also holds a rider session
 // never shares cache entries with it.
@@ -12,7 +12,6 @@ export const driverKeys = {
   earnings: (period: string) => [...driverKeys.all, 'earnings', period] as const,
   onlineTime: (period: string) => [...driverKeys.all, 'online-time', period] as const,
   currentTrip: () => [...driverKeys.all, 'current-trip'] as const,
-  place: (lat: number, lng: number) => ['places', 'reverse', lat.toFixed(4), lng.toFixed(4)] as const,
 };
 
 export function useDriverProfileQuery() {
@@ -66,24 +65,4 @@ export function useSetPausedMutation() {
     mutationFn: (isPaused: boolean) => driverClient.setPaused(isPaused),
     onSuccess: (result) => queryClient.setQueryData(driverKeys.profile(), result),
   });
-}
-
-/** Street-level label for a coordinate, via the backend's Google Places proxy.
- *  Rounded to ~11m so nearby offers share one lookup. */
-export function usePlaceLabel(lat: number, lng: number) {
-  return useQuery({
-    queryKey: driverKeys.place(lat, lng),
-    queryFn: () => placesClient.reverseGeocode(lat, lng),
-    staleTime: Infinity,
-    retry: false,
-    select: (place) => shortAddress(place.formatted_address),
-  });
-}
-
-/** "17, Jalan Negeri Sembilan Selatan, Bukit Persekutuan, 50480 …" → "17, Jalan Negeri Sembilan Selatan". */
-export function shortAddress(formatted: string): string {
-  const parts = formatted.split(',').map((part) => part.trim()).filter(Boolean);
-  if (parts.length === 0) return formatted;
-  // A bare street number reads badly on its own; keep it with the street.
-  return /^\d+[A-Za-z]?$/.test(parts[0]) && parts[1] ? `${parts[0]}, ${parts[1]}` : parts[0];
 }

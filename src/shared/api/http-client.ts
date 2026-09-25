@@ -20,6 +20,7 @@ export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   body?: unknown;
   query?: Record<string, string | number | undefined>;
+  headers?: Record<string, string>;
   /** Whose session token to send. Omit for signup/login. */
   auth?: Role;
 }
@@ -35,11 +36,11 @@ function withQuery(path: string, query: RequestOptions['query']): string {
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, query, auth } = options;
+  const { method = 'GET', body, query, auth, headers: extraHeaders } = options;
   const url = withQuery(path, query);
   const startedAt = performance.now();
 
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...extraHeaders };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (auth) {
     const token = sessionStores[auth].getState().token;
@@ -60,7 +61,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
   const elapsed = Math.round(performance.now() - startedAt);
   const json: unknown = response.status === 204 ? undefined : await response.json().catch(() => undefined);
-  logEvent('http', `${method} ${url} ${response.status} ${elapsed}ms`, { request: body, response: json });
+  logEvent('http', `${method} ${url} ${response.status} ${elapsed}ms`, { request: body, headers: extraHeaders, response: json });
 
   if (!response.ok) {
     // go-ride-backend returns {code, message}; the kafka-consumers services return

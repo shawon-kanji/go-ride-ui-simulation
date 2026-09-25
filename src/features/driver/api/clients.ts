@@ -7,14 +7,13 @@ import type {
   EarningsResponse,
   KycStatusResponse,
   OnlineTimeResponse,
-  ReverseGeocodeResponse,
   UpdateLocationPayload,
   UpdateLocationResponse,
   Vehicle,
 } from './types';
 
 // Every call sends the driver session's token. Paths are proxied by Vite:
-// /api/v1/driver/* and /api/v1/places/* → go-ride-backend,
+// /api/v1/driver/* → go-ride-backend,
 // /api/v1/driver-trips/* → driver-request-handler, /api/v1/location/* → location-producers.
 
 const auth = 'driver' as const;
@@ -51,9 +50,4 @@ export const driverTripsClient = {
 export const locationClient = {
   update: (payload: UpdateLocationPayload) =>
     apiRequest<UpdateLocationResponse>('/api/v1/location/update-location', { method: 'POST', body: payload, auth }),
-};
-
-export const placesClient = {
-  reverseGeocode: (lat: number, lng: number) =>
-    apiRequest<ReverseGeocodeResponse>('/api/v1/places/reverse-geocode', { query: { lat, lng }, auth }),
 };

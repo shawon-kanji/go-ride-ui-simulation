@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { useRealtimeStore } from '../../../shared/realtime/use-realtime';
 import { Button } from '../../../shared/ui/Button';
-import { usePlaceLabel } from '../api/queries';
+import { usePlaceLabel } from '../../../shared/places/places';
 import { formatKm, formatMinutesShort, formatMoney } from '../format';
 import { type OfferCard as OfferCardModel, useOfferStore } from './offer-store';
 
@@ -14,7 +14,7 @@ const URGENT_MS = 8_000;
 
 /** Street name via reverse geocoding; coordinates while loading or if it fails. */
 function PlaceName({ lat, lng }: { lat: number; lng: number }) {
-  const { data } = usePlaceLabel(lat, lng);
+  const { data } = usePlaceLabel('driver', lat, lng);
   if (data) return <>{data}</>;
   return <span className="font-mono text-[13px]">{`${lat.toFixed(4)}, ${lng.toFixed(4)}`}</span>;
 }
