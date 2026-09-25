@@ -18,6 +18,7 @@ export interface Driver {
   account_status: 'pending' | 'active' | 'blocked';
   is_email_verified: boolean;
   is_online: boolean;
+  is_paused: boolean;
 }
 
 export interface SignupPayload {
