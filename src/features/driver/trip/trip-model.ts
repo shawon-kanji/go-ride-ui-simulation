@@ -48,7 +48,8 @@ export type DriverTripEvent =
   | { type: 'snapshot'; current: CurrentTripResponse; at: number }
   | { type: 'outcome'; requestId: string; entry: DriverTripHistoryEntry | null; at: number }
   | { type: 'cancelled-by-me'; ongoingTripId: string; stage: string; redispatched: boolean; at: number }
-  | { type: 'rider-cancelled'; message: TripCancelledMessage; at: number }
+  /** trip_cancelled on the driver socket: the rider cancelled, or the echo of our own cancel. */
+  | { type: 'server-cancelled'; message: TripCancelledMessage; at: number }
   | { type: 'clear' };
 
 const ORDER: Record<DriverTripPhase, number> = { to_pickup: 0, on_trip: 1, collecting: 2, completed: 3, cancelled: 3 };
@@ -152,11 +153,17 @@ export function reduceDriverTrip(trip: DriverTrip | null, event: DriverTripEvent
         redispatched: event.redispatched,
       });
 
-    case 'rider-cancelled': {
+    case 'server-cancelled': {
       const m = event.message;
       if (!trip || trip.requestId !== m.request_id) return trip;
-      // Our own cancel also comes back on the socket; the HTTP response already settled it.
-      return advance(trip, 'cancelled', event.at, { cancelledBy: m.cancelled_by, cancelStage: m.stage });
+      // Our own cancel echoes back here, sometimes before the HTTP response. A driver
+      // cancel before pickup is always redispatched (driver-request-handler).
+      const ours = m.cancelled_by === 'driver';
+      return advance(trip, 'cancelled', event.at, {
+        cancelledBy: m.cancelled_by,
+        cancelStage: m.stage,
+        redispatched: ours && m.stage === 'assigned',
+      });
     }
 
     case 'clear':

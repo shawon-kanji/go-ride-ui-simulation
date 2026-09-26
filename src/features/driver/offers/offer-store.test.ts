@@ -40,6 +40,25 @@ describe('offer store', () => {
     expect(store().offers.a.state).toBe('accepting');
   });
 
+  it('revives a settled card when dispatch re-offers the same row (redispatch keeps the job_offer_id)', () => {
+    store().receive(makeOffer('a'), NOW);
+    store().withdrawRequest('req-a', NOW + 1_000); // another driver accepted
+    expect(store().offers.a.state).toBe('taken');
+
+    // That driver cancelled; dispatch upserts this driver's row with a fresh expiry.
+    const reoffer = makeOffer('a', { expires_at: new Date(NOW + 40_000).toISOString() });
+    store().receive(reoffer, NOW + 5_000);
+    expect(store().offers.a).toMatchObject({ state: 'live', settledAt: null, acked: false, offer: reoffer });
+    expect(countOpen(cards())).toBe(1);
+  });
+
+  it('ignores a replay of a settled card with the same expiry', () => {
+    store().receive(makeOffer('a'), NOW);
+    store().withdrawRequest('req-a', NOW + 1_000);
+    store().receive(makeOffer('a'), NOW + 2_000);
+    expect(store().offers.a.state).toBe('taken');
+  });
+
   it('marks an offer that arrives already past its TTL as expired', () => {
     store().receive(makeOffer('a', { expires_at: new Date(NOW - 1).toISOString() }), NOW);
     expect(store().offers.a.state).toBe('expired');

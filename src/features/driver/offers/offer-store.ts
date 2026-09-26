@@ -7,7 +7,8 @@ import type { JobOfferMessage } from '../api/types';
 //   - accept-only, per-offer TTL, first driver to accept wins; there is no decline
 //   - offer_withdrawn (and trip_cancelled) identify the *request*, not the offer:
 //     every live card for that request becomes "Taken by another driver"
-//   - offers are replayed when the socket reconnects, so a repeat is a no-op
+//   - offers are replayed when the socket reconnects, so a repeat is a no-op — except a
+//     re-offer of a settled card (redispatch reuses the job_offer_id with a new expiry)
 //   - a settled card (taken/expired) stays visible, dimmed, for a few seconds
 
 export type OfferState = 'live' | 'accepting' | 'accepted' | 'taken' | 'expired';
@@ -40,7 +41,12 @@ export const useOfferStore = create<OfferStoreState>((set) => ({
 
   receive: (offer, now = Date.now()) =>
     set((store) => {
-      if (store.offers[offer.job_offer_id]) return store; // replay after reconnect
+      const existing = store.offers[offer.job_offer_id];
+      // A repeat is a replay after reconnect — unless the card had settled and this one
+      // expires later: after a driver cancel, dispatch re-offers by resetting the same
+      // driver_job_offers row, so the job_offer_id comes back (offer_version is always 1).
+      const reoffer = existing && !isOpen(existing.state) && Date.parse(offer.expires_at) > Date.parse(existing.offer.expires_at);
+      if (existing && !reoffer) return store;
       const expired = Date.parse(offer.expires_at) <= now;
       return {
         offers: {

@@ -115,7 +115,7 @@ describe('reduceDriverTrip', () => {
       cancelled_at: '',
       sent_at: '',
     };
-    expect(run(accepted, { type: 'rider-cancelled', message, at: T0 + 5 })).toMatchObject({
+    expect(run(accepted, { type: 'server-cancelled', message, at: T0 + 5 })).toMatchObject({
       phase: 'cancelled',
       cancelledBy: 'rider',
       cancelStage: 'assigned',
@@ -126,11 +126,20 @@ describe('reduceDriverTrip', () => {
     const cancelled = run(accepted, { type: 'cancelled-by-me', ongoingTripId: 'ot-1', stage: 'assigned', redispatched: true, at: T0 + 5 });
     expect(cancelled).toMatchObject({ phase: 'cancelled', cancelledBy: 'driver', redispatched: true });
     const echo = reduceDriverTrip(cancelled, {
-      type: 'rider-cancelled',
+      type: 'server-cancelled',
       message: { type: 'trip_cancelled', request_id: 'req-1', trip_id: 'trip-1', stage: 'assigned', cancelled_by: 'driver', cancelled_at: '', sent_at: '' },
       at: T0 + 6,
     });
     expect(echo).toBe(cancelled);
+  });
+
+  it('the echo of our own cancel can arrive first and still records the redispatch', () => {
+    const trip = run(accepted, {
+      type: 'server-cancelled',
+      message: { type: 'trip_cancelled', request_id: 'req-1', trip_id: 'trip-1', stage: 'assigned', cancelled_by: 'driver', cancelled_at: '', sent_at: '' },
+      at: T0 + 5,
+    });
+    expect(trip).toMatchObject({ phase: 'cancelled', cancelledBy: 'driver', redispatched: true });
   });
 
   it('a vanished trip takes its outcome from history', () => {

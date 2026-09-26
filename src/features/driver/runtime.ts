@@ -67,7 +67,7 @@ function useOfferFeed(): void {
           break;
         case 'trip_cancelled':
           store.withdrawRequest((message as unknown as TripCancelledMessage).request_id);
-          dispatchDriverTrip({ type: 'rider-cancelled', message: message as unknown as TripCancelledMessage, at: Date.now() });
+          dispatchDriverTrip({ type: 'server-cancelled', message: message as unknown as TripCancelledMessage, at: Date.now() });
           break;
       }
     });
