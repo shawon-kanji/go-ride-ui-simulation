@@ -322,10 +322,14 @@ Each phase ends with something you can run and click through.
 - **Done when:** a rider request produces offers in 2+ driver tabs, one accepts, the other's
   card goes to "taken", and the rider sees the driver moving.
 
-### Phase 4 — Trip completion and cancellation
-- Driver D09: start with PIN, end, cash collected; D10 cancel with reason.
-- Rider R06 on trip, `trip_ended` / `trip_completed`, rating; rider cancel at each stage.
-- Driver cancel → redispatch visible to the rider.
+### Phase 4 — Trip completion and cancellation (next; research done 2026-09-26)
+- Driver D09: heading to pickup and start with the rider's PIN (designed in-app), then on trip → End trip → Cash
+  collected. D10 cancel with a reason; a cancel before pickup sends the request back into dispatch.
+- Rider R06 on trip, with progress **estimated** from the booked route because the gateway stops `driver_location`
+  at trip start. Then pay your driver → trip complete + rating. Rider cancel at every stage that allows it.
+- Driver cancel before pickup → the rider sees "finding you another driver" → a second driver accepts → the new
+  driver and PIN appear. A driver cancel mid-trip ends the trip.
+- The full task list, backend state machine and error codes are in PROGRESS.md.
 - **Done when:** the full lifecycle and both cancel paths work end to end.
 
 ### Phase 5 — Simulator power features
@@ -341,9 +345,10 @@ Each phase ends with something you can run and click through.
 ### Tests along the way
 - Vitest: session store, duplicate-tab guard, bus protocol, WS reconnect, location
   throttle (ported tests), offer countdown/expiry reducer, trip-state reducer.
-- Playwright (Phase 4+): one browser context, several pages — log in a rider and two
-  drivers, place them via the simulator page, book, accept, complete. This also proves the
-  per-tab session isolation.
+- Multi-tab end-to-end: `npm run smoke:firefox` (puppeteer-core driving the local Firefox —
+  chosen over Playwright in Phase 0). One browser, several pages: a rider and two drivers,
+  placed via the simulator page's bus, book, accept, and (from Phase 4) complete and cancel.
+  This also proves the per-tab session isolation.
 
 ---
 

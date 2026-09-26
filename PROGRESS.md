@@ -4,7 +4,7 @@ The working log for this repo. [PLAN.md](PLAN.md) is the design; this file track
 what's next at task level, and what was learned along the way. Update it at the end of
 every working session and every phase.
 
-**Last updated:** 2026-09-26 · **Current phase:** 4 (not started)
+**Last updated:** 2026-09-26 · **Current phase:** 4 (research done, build not started)
 
 ---
 
@@ -125,33 +125,126 @@ Plus, in `go-ride-kafka-consumers/services/cab-request-handler/.env` (gitignored
 
 ## Next: Phase 4 — Trip completion and cancellation
 
-**Done when:** the full lifecycle (assigned → started with PIN → ended → cash collected → rated) and both cancel paths
-(rider at each stage, driver with redispatch) work end to end in the web screens.
+**Done when**, all through the web screens:
+1. **Happy path:** the driver enters the rider's start PIN (a wrong PIN is rejected), the trip starts, and the rider
+   sees R06. The driver ends the trip, the rider sees the fare due, and the driver marks the cash collected. The rider
+   sees the trip complete and rates the driver. The driver's D06 earnings go up.
+2. **Rider cancels** at each stage that allows it: searching, driver on the way, on trip.
+3. **Driver cancels before pickup:** the rider sees "finding you another driver", a second driver gets the offer
+   (the first doesn't), accepts, and the rider sees the new driver, plate and PIN. A driver cancelling mid-trip ends
+   the trip for the rider.
 
-### 4.0 Prep
-- [ ] Render D09, D10 (`Driver App.dc.html`) and R06 (`Ride Booking Flow v2.dc.html`) with `npm run handoff:shots`
-- [ ] Read driver-request-handler's start/end/collect-payment/cancel handlers for request bodies and error codes
-      (PIN mismatch, wrong status); check what `trip_cancelled` the rider gets when the driver cancels at `assigned`
-      (driver-request-handler sets `Redispatch: stage == "assigned"` — the same request goes back to dispatch)
+### 4.0 Research ✅ (2026-09-26)
+Designs rendered to `test-results/handoff/`: `09-Trip-in-progress.png`, `10-Cancel-trip.png`, `06-On-trip.png`.
+Nothing in the Expo driver app to port (its trips client covers earnings/online time only).
 
-### 4.1 Driver D09 (replaces the temporary TripAssignedScreen)
-- [ ] Trip card with rider pickup/drop-off names, navigate-to-pickup state, **Start with PIN** (`POST /driver-trips/ongoing-trips/{id}/start`)
-- [ ] On trip → **End trip** (`/end`) → cash collection with the final fare → **Cash collected** (`/collect-payment`)
-- [ ] D10 cancel sheet with a reason (`/cancel`), enum reasons like the rider's
-- [ ] Rebuild from `GET /driver-trips/current-trip` on reload; handle rider `trip_cancelled` on the driver socket
+**Backend state machine** (driver-request-handler `internal/offers/service.go`, cab-request-handler):
 
-### 4.2 Rider side
-- [ ] R06 On trip (replaces TripScreen's `TripStatus` for `in_progress`): route to drop-off, live driver, ETA to drop-off
-- [ ] Awaiting payment (fare due, cash) → completed → rating (`POST /cab/trips/{ongoing_trip_id}/rate`, 1–5 + comment)
-- [ ] **Reducer change:** a driver cancel that redispatches must move the trip back to `searching` (today `cancelled` is
-      final and a later `ride_assigned` for the same request is ignored) — add a test first
-- [ ] Rider cancel during `in_progress` (expect `trip_not_cancellable`?) — confirm and show a readable message
+| `ongoing_trips.status` | Action | Endpoint (body) | → status | Rider gets |
+|---|---|---|---|---|
+| `assigned` | Driver starts with PIN | `POST /api/v1/driver-trips/ongoing-trips/{id}/start` `{start_pin}` | `in_progress` | `trip_started` |
+| `in_progress` | Driver ends | `…/{id}/end` (no body) | `awaiting_payment`, `final_fare` = locked quote total | `trip_ended {final_fare, currency_code}` |
+| `awaiting_payment` | Driver collects cash | `…/{id}/collect-payment` (no body) | `completed` | `trip_completed` |
+| `assigned` / `in_progress` | Driver cancels | `…/{id}/cancel` `{reason, note?}` (reason **required**) | `cancelled` | `trip_cancelled {cancelled_by: "driver", stage}` |
+| `assigned` / `in_progress` | Rider cancels | `POST /api/v1/cab/request-cab/{request_id}/cancel` | `cancelled` | — (driver gets `trip_cancelled`) |
+| `completed` | Rider rates | `POST /api/v1/cab/trips/{ongoing_trip_id}/rate` `{rating 1–5, comment?}` | — | — |
 
-### 4.3 Simulator + tests
-- [ ] Simulator: driver link switches to pickup → drop-off once the trip starts
-- [ ] Unit tests: redispatch in the reducer, D09 state machine
-- [ ] Smoke: start with PIN → end → collect → rider rates; driver cancel → rider sees searching again → second driver accepts
-- [ ] Commit per sub-area, push, update this file
+`{id}` is `ongoing_trip.trip_record_id`. `driver_arriving` exists in the schema but nothing sets it.
+
+**Error codes to map to readable text:**
+- start: 400 `invalid_start_pin` (not 4 digits), **403 `invalid_start_pin` (wrong PIN)**, 409 `trip_not_startable`
+- end: 409 `trip_not_endable`
+- collect: 409 `trip_not_collectable`
+- driver cancel: 400 `invalid_cancellation_reason`, 409 `trip_already_cancelled` / `trip_not_cancellable`
+- rider cancel: 409 `trip_not_cancellable` during `awaiting_payment`
+- rate: 409 `trip_not_completed` / `trip_already_rated`, 400 `invalid_rating`
+- all: 404 `trip_not_found`, 403 `trip_forbidden`
+
+**Redispatch** (trip-dispatch-worker `HandleDriverCancellation`):
+- A driver cancel at stage `assigned` resets the **same request** to `searching` (attempt count 0) and dispatches
+  again straight away. The cancelling driver is excluded.
+- The rider gets `trip_cancelled (cancelled_by: driver, stage: assigned)`. `current-trip` then shows `trip_request`
+  with status `searching`. Later a `ride_assigned` arrives for the same `request_id`.
+- **The `ongoing_trips` row is reused**: same `ongoing_trip_id`, new driver, **new start PIN**.
+- A driver cancel at `in_progress` does not redispatch; the trip is over for the rider.
+
+**Gaps found:**
+- **No live driver position after pickup.** The gateway stops `driver_location` at `trip_started` ("pings are about
+  to stop"; `tripstart/notifier.go` clears the active trip). R06 therefore **estimates** progress from `started_at`
+  and the booked route (duration, distance, polyline), which must now be kept on the rider trip at booking.
+  Recorded under Known issues; no backend change planned.
+- The driver's `current-trip` has **no rider name and no start PIN**; the PIN is by design, since the rider reads it
+  out. The rider name only arrives on `job_offer.rider_name`, so the driver tab keeps it with its trip in
+  `sessionStorage`, like the rider tab does with `ride_assigned`.
+- **Design gaps** (design them in-app, as with D06's online block):
+  - D09 draws only the on-trip state, with both `Cash collected` and `End trip` visible. The backend needs End first,
+    then Collect.
+  - Not designed: driver heading to pickup + PIN entry; rider "pay your driver"; trip complete + rating; "your driver
+    cancelled, finding another".
+- R06's "Trip shared with 2 contacts" and "Add a stop", and D09's call and Navigate buttons, have no backend. Keep
+  them visible but inactive. Navigate becomes "drive there" in Phase 5.
+
+### 4.1 Driver trip model (`features/driver/trip/`)
+- [ ] Types + `driverTripsClient`: `startTrip(id, pin)`, `endTrip(id)`, `collectPayment(id)`, `cancelTrip(id, reason, note?)`
+- [ ] Trip reducer + store, persisted in `goride:driver-trip`
+  - Sources: the accept response, `current-trip` snapshots, and `trip_cancelled` on the driver socket
+  - Phases: `to_pickup` (`assigned`) → `on_trip` → `collecting` (`awaiting_payment`) → `completed`, or `cancelled`
+    (`by rider` / `by me`)
+  - Keeps the rider name (from the accepted offer card), pickup/drop-off labels, fare and currency, `started_at`
+- [ ] Mutations update the store and the `current-trip` cache. Collect also invalidates earnings, online time and stats
+      so D06's stat cards refresh.
+- [ ] Runtime: sync `current-trip` on load and reconnect; rider cancel → phase `cancelled by rider`; simulator activity
+      `to pickup` / `on trip` / `collecting cash`; the offer feed stays quiet while on a trip.
+- [ ] Unit tests: reducer (each transition, rider cancel, reload from snapshot, settled trips ignore late messages)
+
+### 4.2 D09 + D10 (replace `TripAssignedScreen`, route `/driver/trip`)
+- [ ] **To pickup** (designed in-app): map with the driver and pickup and a line between them; rider row (initials,
+      name, pickup label); "At the pickup? Enter the rider's PIN" as four digit boxes, then `Start trip`.
+      A wrong PIN shows "That PIN doesn't match — ask the rider to read it again"; `Cancel trip` opens D10.
+- [ ] **On trip** (D09 design): "On trip · N min left" pill, Navigate (inactive); rider row; green collection block
+      with "COLLECT ON ARRIVAL" and the fare; `End trip` primary, `Cash collected` disabled until ended; footer
+      "Started HH:MM · fare locked, no surge added" and `Cancel trip`.
+- [ ] **Collecting:** same block, `End trip` done, `Cash collected` enabled.
+- [ ] **Completed:** "RM X collected" → `Back to map` (still online). **Cancelled by rider:** banner + `Back to map`.
+- [ ] **D10 sheet:** five reasons in design order, mapped to the enum (rider absent → `rider_absent`, rider asked →
+      `rider_requested`, vehicle problem, wrong/unsafe destination, something else → `other`); optional note;
+      `Keep trip` / danger `Cancel trip`, disabled until a reason is picked. The copy differs before pickup
+      ("the trip goes back into dispatch") and mid-trip. Afterwards → D06.
+- [ ] Offer arrival must not pull a driver off D09 (already true for `/driver/trip*`; keep it that way).
+
+### 4.3 Rider side
+- [ ] **Reducer, test first:** `trip_cancelled {cancelled_by: driver, stage: assigned}` sets the trip back to
+      `searching`. It clears the driver, PIN, fix and `ongoingTripId` and sets `redispatched: true`. A later
+      `ride_assigned` for the same request gives `assigned` with the new driver and PIN; the PIN must replace the old
+      one, not keep it via `??`. A driver cancel at `in_progress` stays final.
+- [ ] Keep `routeDistanceKm`, `routeDurationMinutes` and `routePolyline` from the booked quote on the trip.
+- [ ] R04 when `redispatched`: "Your driver cancelled — finding you another".
+- [ ] **R06 On trip** (design), replacing `TripStatus` for `in_progress`:
+  - map with the route polyline and drop-off (no live car: estimated)
+  - "On route" pill; ARRIVING clock = `started_at` + route duration; min/km left and progress bar from elapsed time
+  - compact driver row with plate
+  - `Cancel trip` (rider, stage `in_progress`, reasons mapped to the enum); "Trip shared" / "Add a stop" inactive
+- [ ] **Pay your driver** (`awaiting_payment`, designed in-app): "You've arrived — pay RM X in cash to <driver>", waiting
+      for the driver to confirm, no cancel.
+- [ ] **Trip complete + rating** (designed in-app): fare paid; 1–5 stars + optional comment → rate → `Done`.
+      `Skip` → `Done`. `trip_already_rated` → `Done`. Clears the trip and the booking draft.
+- [ ] **Driver ended the trip mid-way** (`cancelled`, `in_progress`, by driver): a final screen with `Done`.
+
+### 4.4 Simulator + tests
+- [ ] Simulator link follows the phase: driver → pickup before the start, driver → drop-off after it.
+- [ ] Unit tests: rider redispatch, driver trip reducer, R06 time-based progress maths.
+- [ ] Smoke, happy path:
+  - wrong PIN rejected, right PIN → R06
+  - End → rider sees the fare due; Collect → rider rates
+  - `/cab/trips` shows the trip `completed`; the driver's today earnings include the fare
+- [ ] Smoke, redispatch: two drivers online; driver 1 accepts then cancels with a reason. The rider's R04 says
+      "finding another". Driver 2 is offered (driver 1 is not), accepts, and the rider's R05 shows `SIM2002` with a
+      new PIN.
+- [ ] Smoke, rider cancel from R06 (mid-trip) → the driver's D09 shows the rider cancelled.
+- [ ] Commit per sub-area, push, update this file.
+
+**Suggested order:** 4.1 → 4.2 (the driver can drive a trip to completion; rider screens still show `TripStatus`),
+then 4.3, then 4.4.
 
 ## Decisions log
 
@@ -212,6 +305,9 @@ Plus, in `go-ride-kafka-consumers/services/cab-request-handler/.env` (gitignored
   follow-ups (clear trip + navigate) in the `useMutation` options instead.
 - **"Where to?" is a placeholder**, not text — tests wait for "Choose on map" to know R01 is up.
 - **`@types/google.maps`** must be listed in tsconfig `types` to use `google.maps.*` in our code.
+- **Redispatch reuses the `ongoing_trips` row** (same `ongoing_trip_id`, new driver, new PIN) — key driver details by
+  driver id, not by trip id.
+- **Driver-trip actions are in a strict order**: start (PIN) → end → collect-payment. There's no "collect before end".
 - **Dispatch eligibility** (trip-dispatch-worker): `is_online AND NOT is_paused`, active vehicle,
   location `recorded_at` within 300s, within 20→30 km, tier (RIDE any / RIDE_XL ≥6 seats /
   RIDE_PREMIUM luxury), no ongoing trip, didn't cancel this request before.
@@ -235,6 +331,9 @@ Plus, in `go-ride-kafka-consumers/services/cab-request-handler/.env` (gitignored
 
 - `location-consumers` health endpoint on `:8085` didn't answer (the consumer itself is running) — check its config if needed.
 - Home page and simulator use a few literal rider/driver hex colours outside the themed phone frame.
+- **No driver position after pickup:** websocket-gateway stops `driver_location` at `trip_started`, so R06 shows
+  estimated progress (route duration from `started_at`) rather than a live car. A backend change (keep the stream
+  until `trip_ended`, retargeted to the drop-off) would fix it; not planned.
 - ~~Currency~~ — resolved 2026-09-26 (MYR via KUL fare configs).
 - Rider cancel reasons map to the enum (`rider_requested`/`other`) with the wording in `note`; the backend has no
   rider-specific reasons.
