@@ -62,9 +62,10 @@ function Searching({ trip }: { trip: RiderTrip }) {
   return (
     <>
       <h1 data-testid="finding-headline" className="text-[26px] leading-tight font-extrabold tracking-[-0.02em] text-r-ink">
-        {HEADLINES[trip.searchStatus ?? 'search_started']}
+        {trip.redispatched ? 'Your driver cancelled — finding you another' : HEADLINES[trip.searchStatus ?? 'search_started']}
       </h1>
       <p className="mt-2 text-[15px] leading-snug text-r-ink-2">
+        {trip.redispatched ? 'Your trip went straight back out to drivers nearby. ' : ''}
         {fare ? `Your fare stays at ${fare} whatever happens next. ` : ''}Cancel free until someone accepts.
       </p>
 

@@ -54,7 +54,19 @@ export function useRequestCabMutation() {
     onSuccess: (response, { quote, pickup, dropoff }) => {
       // The booked quote is spent, and its siblings belong to a finished decision.
       queryClient.removeQueries({ queryKey: [...riderKeys.all, 'fare-estimate'] });
-      dispatchTrip({ type: 'requested', response, pickup, dropoff, serviceType: quote.service_type, at: Date.now() });
+      dispatchTrip({
+        type: 'requested',
+        response,
+        pickup,
+        dropoff,
+        serviceType: quote.service_type,
+        route: {
+          distanceKm: quote.route_distance_km,
+          durationMinutes: quote.route_duration_minutes,
+          polyline: quote.route_polyline,
+        },
+        at: Date.now(),
+      });
     },
   });
 }
@@ -83,5 +95,15 @@ export function useCancelTripMutation() {
       // Someone got there first (the driver, or another tab): it's over either way.
       if (error instanceof ApiError && error.code === 'trip_already_cancelled') finish(requestId, 'unknown');
     },
+  });
+}
+
+/** Rate a completed trip. An already-rated trip counts as done. */
+export function useRateTripMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ongoingTripId, rating, comment }: { ongoingTripId: string; rating: number; comment?: string }) =>
+      cabClient.rateTrip(ongoingTripId, rating, comment),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: riderKeys.trips() }),
   });
 }

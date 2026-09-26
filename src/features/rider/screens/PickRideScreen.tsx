@@ -1,10 +1,11 @@
 import { Polyline } from '@vis.gl/react-google-maps';
 import { ArrowLeft, Banknote, CalendarDays, Car, CarFront, ChevronDown, ChevronUp, RefreshCw, User, Van } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 
 import { ApiError } from '../../../shared/api/http-client';
 import { formatMoney, formatMoneyTight } from '../../../shared/lib/format';
+import { useNow } from '../../../shared/lib/use-now';
 import { Button } from '../../../shared/ui/Button';
 import { useFareEstimateQuery, useRequestCabMutation } from '../api/queries';
 import type { FareQuote, ServiceType } from '../api/types';
@@ -19,15 +20,6 @@ import { FitBounds, PlaceDot, AppMap } from '../../../shared/map/map-pieces';
 
 const TIER_ICONS: Record<ServiceType, typeof Car> = { RIDE: Car, RIDE_XL: Van, RIDE_PREMIUM: CarFront };
 const MAP_HEIGHT = 230;
-
-function useNow(intervalMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(timer);
-  }, [intervalMs]);
-  return now;
-}
 
 function TierCard({ quote, selected, onSelect }: { quote: FareQuote; selected: boolean; onSelect: () => void }) {
   const tier = TIERS[quote.service_type];

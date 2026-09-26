@@ -32,15 +32,34 @@ const ASSIGNED_REASONS: ReasonOption[] = [
   { id: 'other', label: 'Something else', reason: 'other' },
 ];
 
+const IN_TRIP_REASONS: ReasonOption[] = [
+  { id: 'here', label: 'I want to get out here', reason: 'rider_requested' },
+  { id: 'unsafe', label: 'I don’t feel safe', reason: 'other' },
+  { id: 'route', label: 'We’re going the wrong way', reason: 'unsafe_destination' },
+  { id: 'other', label: 'Something else', reason: 'other' },
+];
+
+const COPY = {
+  searching: { title: 'Cancel this request?', body: 'No fee — nobody has accepted yet. Tell us why:', confirm: 'Cancel request', reasons: SEARCH_REASONS },
+  assigned: { title: 'Cancel your ride?', body: 'Your driver is already on the way. Tell us why:', confirm: 'Cancel ride', reasons: ASSIGNED_REASONS },
+  in_progress: {
+    title: 'End the trip here?',
+    body: 'Your driver is told straight away and the trip ends. Tell us why:',
+    confirm: 'Cancel trip',
+    reasons: IN_TRIP_REASONS,
+  },
+} as const;
+
 interface CancelTripSheetProps {
   open: boolean;
   requestId: string;
-  stage: 'searching' | 'assigned';
+  stage: keyof typeof COPY;
   onDismiss: () => void;
 }
 
 export function CancelTripSheet({ open, requestId, stage, onDismiss }: CancelTripSheetProps) {
-  const options = stage === 'searching' ? SEARCH_REASONS : ASSIGNED_REASONS;
+  const copy = COPY[stage];
+  const options = copy.reasons;
   const [selected, setSelected] = useState<string | null>(null);
   const cancel = useCancelTripMutation();
   const option = options.find((o) => o.id === selected) ?? null;
@@ -61,13 +80,9 @@ export function CancelTripSheet({ open, requestId, stage, onDismiss }: CancelTri
   return (
     <ModalSheet open={open} onDismiss={onDismiss} labelledBy="cancel-trip-title">
       <h2 id="cancel-trip-title" className="text-[22px] font-extrabold tracking-[-0.02em] text-r-ink">
-        {stage === 'searching' ? 'Cancel this request?' : 'Cancel your ride?'}
+        {copy.title}
       </h2>
-      <p className="mt-1 text-[14px] text-r-ink-2">
-        {stage === 'searching'
-          ? 'No fee — nobody has accepted yet. Tell us why:'
-          : 'Your driver is already on the way. Tell us why:'}
-      </p>
+      <p className="mt-1 text-[14px] text-r-ink-2">{copy.body}</p>
 
       <div role="radiogroup" className="mt-4 flex flex-col gap-2">
         {options.map((o) => {
@@ -96,7 +111,7 @@ export function CancelTripSheet({ open, requestId, stage, onDismiss }: CancelTri
 
       <div className="mt-5 flex flex-col gap-2">
         <Button
-          label={stage === 'searching' ? 'Cancel request' : 'Cancel ride'}
+          label={copy.confirm}
           variant="destructive"
           shape="pill"
           size="large"

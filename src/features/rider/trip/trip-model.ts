@@ -69,8 +69,20 @@ export interface RiderTrip {
   finalFare?: number;
   cancelledBy?: string;
   cancelStage?: string;
+  /** The booked quote's route; R06 estimates progress from it (no driver_location after pickup). */
+  route?: TripRoute;
+  startedAt?: number;
+  /** Set while searching again because the assigned driver cancelled before pickup. */
+  redispatched?: boolean;
   /** When the phase last changed (epoch ms). */
   phaseAt: number;
+}
+
+export interface TripRoute {
+  distanceKm?: number;
+  durationMinutes?: number;
+  /** Google encoded polyline. */
+  polyline?: string;
 }
 
 export type TripEvent =
@@ -80,6 +92,7 @@ export type TripEvent =
       pickup: TripPlace;
       dropoff: TripPlace;
       serviceType: ServiceType;
+      route?: TripRoute;
       at: number;
     }
   | { type: 'message'; message: RiderMessage; at: number }
@@ -110,6 +123,26 @@ function advance(trip: RiderTrip, phase: TripPhase, at: number, patch: Partial<R
   if (!isActivePhase(trip.phase)) return trip; // settled: nothing changes it any more
   if (PHASE_ORDER[phase] < PHASE_ORDER[trip.phase]) return { ...trip, ...patch, phase: trip.phase };
   return { ...trip, ...patch, phase, phaseAt: trip.phase === phase ? trip.phaseAt : at };
+}
+
+/**
+ * The assigned driver cancelled before pickup: dispatch puts the same request back into
+ * the pool (and will reuse the ongoing trip row, with a new PIN, for the next driver).
+ * The only way a trip moves backwards.
+ */
+function redispatch(trip: RiderTrip, at: number): RiderTrip {
+  if (trip.phase !== 'assigned') return trip;
+  return {
+    ...trip,
+    phase: 'searching',
+    searchStatus: 'searching',
+    driver: undefined,
+    startPin: undefined,
+    driverFix: undefined,
+    ongoingTripId: undefined,
+    redispatched: true,
+    phaseAt: at,
+  };
 }
 
 function ongoingPhase(status: OngoingTripStatus): TripPhase {
@@ -153,12 +186,14 @@ function applyMessage(trip: RiderTrip | null, message: RiderMessage, at: number)
             requestedAt: at,
             phaseAt: at,
           };
+      const sameDriver = base.driver?.id === message.driver_id;
       return advance(base, 'assigned', at, {
         ongoingTripId: message.ongoing_trip_id,
         driver,
-        startPin: message.start_pin ?? base.startPin,
-        driverFix: base.driverFix ?? fix,
+        startPin: message.start_pin ?? (sameDriver ? base.startPin : undefined),
+        driverFix: (sameDriver ? base.driverFix : undefined) ?? fix,
         searchStatus: undefined,
+        redispatched: false,
       });
     }
 
@@ -181,6 +216,7 @@ function applyMessage(trip: RiderTrip | null, message: RiderMessage, at: number)
     case 'trip_started':
       if (!sameTrip(trip, message.request_id, message.trip_id)) return trip;
       return advance(trip, 'in_progress', at, {
+        startedAt: Date.parse(message.started_at) || at,
         driver: {
           ...(trip.driver ?? { id: message.driver_id }),
           vehicleModel: message.vehicle_model ?? trip.driver?.vehicleModel,
@@ -199,6 +235,7 @@ function applyMessage(trip: RiderTrip | null, message: RiderMessage, at: number)
 
     case 'trip_cancelled':
       if (!sameTrip(trip, message.request_id, message.trip_id)) return trip;
+      if (message.cancelled_by === 'driver' && message.stage === 'assigned') return redispatch(trip, at);
       return advance(trip, 'cancelled', at, { cancelledBy: message.cancelled_by, cancelStage: message.stage });
   }
 }
@@ -219,6 +256,7 @@ function applySnapshot(trip: RiderTrip | null, current: CurrentTripResponse, at:
           phaseAt: at,
         };
     return advance(base, ongoingPhase(ongoing.status), at, {
+      startedAt: (ongoing.started_at ? Date.parse(ongoing.started_at) : undefined) || base.startedAt,
       ongoingTripId: ongoing.trip_record_id,
       startPin: ongoing.start_pin ?? base.startPin,
       driver: base.driver?.id === ongoing.driver_id ? base.driver : { id: ongoing.driver_id },
@@ -230,7 +268,10 @@ function applySnapshot(trip: RiderTrip | null, current: CurrentTripResponse, at:
   const request = current.trip_request;
   if (request) {
     if (sameTrip(trip, request.request_id, request.trip_id)) {
-      return trip.phase === 'searching' ? { ...trip, searchStatus: request.status } : trip;
+      if (trip.phase === 'searching') return { ...trip, searchStatus: request.status };
+      // We missed a driver cancel (reload, reconnect): the request is back in dispatch.
+      if (trip.phase === 'assigned') return { ...redispatch(trip, at), searchStatus: request.status };
+      return trip;
     }
     return {
       requestId: request.request_id,
@@ -275,6 +316,7 @@ export function reduceTrip(trip: RiderTrip | null, event: TripEvent): RiderTrip 
         pickup: event.pickup,
         dropoff: event.dropoff,
         serviceType: event.serviceType,
+        route: event.route,
         currency: event.response.currency_code,
         fareTotal: event.response.estimated_total_fare,
         requestedAt: event.at,

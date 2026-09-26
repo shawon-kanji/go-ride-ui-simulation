@@ -1,20 +1,20 @@
 import { Polyline } from '@vis.gl/react-google-maps';
-import { CircleCheck, MessageSquare, Phone, Shield, Star, XCircle } from 'lucide-react';
+import { MessageSquare, Phone, Shield, Star } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Navigate, useNavigate } from 'react-router';
+import { Navigate } from 'react-router';
 
 import { distanceKm, formatMoney } from '../../../shared/lib/format';
-import { Button } from '../../../shared/ui/Button';
-import { useBookingDraft } from '../booking/booking-draft';
 import { CancelTripSheet } from '../components/CancelTripSheet';
 import { PIN_COLORS } from '../../../shared/map/map-colors';
 import { CarMarker, FitBounds, PlaceDot, AppMap } from '../../../shared/map/map-pieces';
 import type { RiderTrip } from '../trip/trip-model';
-import { dispatchTrip, useTripStore } from '../trip/trip-store';
+import { OnTripScreen } from './OnTripScreen';
+import { PayDriverScreen, TripCompleteScreen, TripEndedScreen } from './TripEndScreens';
+import { useTripStore } from '../trip/trip-store';
 
-// R05 Driver on the way, from ride_assigned (driver, vehicle, plate, start PIN) and the
-// driver_location stream (position, distance and ETA to the pickup). Trip phases after
-// pickup get a plain status card until R06 and the rating screen arrive in Phase 4.
+// /user/trip: R05 Driver on the way (from ride_assigned — driver, vehicle, plate, start
+// PIN — and the driver_location stream), then R06 on trip, pay your driver, trip
+// complete + rating, or how it ended.
 
 const FALLBACK_SPEED_KMH = 25;
 const SHEET_HEIGHT = 440;
@@ -192,65 +192,22 @@ function DriverOnTheWay({ trip }: { trip: RiderTrip }) {
   );
 }
 
-/** Phase 4 replaces this with R06 (on trip), payment and rating. */
-function TripStatus({ trip }: { trip: RiderTrip }) {
-  const navigate = useNavigate();
-  const resetDraft = useBookingDraft((s) => s.reset);
-  const settled = trip.phase === 'completed' || trip.phase === 'cancelled' || trip.phase === 'timed_out';
-  const byDriver = trip.phase === 'cancelled' && trip.cancelledBy === 'driver';
-  const fare = trip.finalFare ?? trip.fareTotal;
-
-  const titles: Record<RiderTrip['phase'], string> = {
-    searching: '',
-    assigned: '',
-    in_progress: `On the way to ${trip.dropoff.label ?? 'your drop-off'}`,
-    awaiting_payment: 'You’ve arrived — pay your driver',
-    completed: 'Trip complete',
-    cancelled: byDriver ? 'Your driver cancelled' : 'Trip cancelled',
-    timed_out: 'No driver found',
-  };
-
-  const done = () => {
-    dispatchTrip({ type: 'clear' });
-    resetDraft();
-    navigate('/user', { replace: true });
-  };
-
-  return (
-    <div className="flex flex-1 flex-col justify-end bg-r-bg px-4 pb-5">
-      <div className="rounded-sheet bg-white px-5 py-6 shadow-sheet">
-        <span
-          className={`flex h-12 w-12 items-center justify-center rounded-pill ${trip.phase === 'cancelled' ? 'bg-danger-50 text-danger-600' : 'bg-primary-50 text-primary-600'}`}
-        >
-          {trip.phase === 'cancelled' ? <XCircle size={24} /> : <CircleCheck size={24} />}
-        </span>
-        <h1 data-testid="trip-status" className="mt-3 text-[26px] font-extrabold tracking-[-0.02em] text-r-ink">
-          {titles[trip.phase]}
-        </h1>
-        {fare !== undefined && (
-          <p className="mt-1 text-[15px] text-r-ink-2">
-            {trip.phase === 'completed' ? 'Paid' : 'Fare'} {formatMoney(fare, trip.currency)} · cash
-          </p>
-        )}
-        {trip.driver?.name && (
-          <p className="mt-1 text-[14px] text-r-ink-3">
-            {trip.driver.name}
-            {trip.driver.vehiclePlate ? ` · ${trip.driver.vehiclePlate}` : ''}
-          </p>
-        )}
-        {settled && (
-          <div className="mt-5">
-            <Button label="Done" shape="pill" size="large" onClick={done} />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function TripScreen() {
   const trip = useTripStore((s) => s.trip);
   if (!trip) return <Navigate to="/user" replace />;
-  if (trip.phase === 'searching') return <Navigate to="/user/finding" replace />;
-  return trip.phase === 'assigned' ? <DriverOnTheWay trip={trip} /> : <TripStatus trip={trip} />;
+  switch (trip.phase) {
+    case 'searching':
+    case 'timed_out':
+      return <Navigate to="/user/finding" replace />;
+    case 'assigned':
+      return <DriverOnTheWay trip={trip} />;
+    case 'in_progress':
+      return <OnTripScreen trip={trip} />;
+    case 'awaiting_payment':
+      return <PayDriverScreen trip={trip} />;
+    case 'completed':
+      return <TripCompleteScreen trip={trip} />;
+    case 'cancelled':
+      return <TripEndedScreen trip={trip} />;
+  }
 }

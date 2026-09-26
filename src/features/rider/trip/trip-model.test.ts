@@ -58,6 +58,7 @@ const location = (lat: number, overrides: Partial<DriverLocationMessage> = {}): 
 });
 
 const message = (m: RiderMessage, at = T0 + 1_000): TripEvent => ({ type: 'message', message: m, at });
+const base = { request_id: 'req-1', trip_id: 'trip-1', ongoing_trip_id: 'ot-1', driver_id: 'drv-1', sent_at: '' };
 
 function run(...events: TripEvent[]): RiderTrip | null {
   return events.reduce<RiderTrip | null>((trip, event) => reduceTrip(trip, event), null);
@@ -107,7 +108,6 @@ describe('reduceTrip', () => {
   });
 
   it('moves through started → ended → completed and keeps the final fare', () => {
-    const base = { request_id: 'req-1', trip_id: 'trip-1', ongoing_trip_id: 'ot-1', driver_id: 'drv-1', sent_at: '' };
     const trip = run(
       requested,
       message(assigned),
@@ -123,7 +123,6 @@ describe('reduceTrip', () => {
   });
 
   it('never goes backwards: a late ride_assigned after trip_started keeps in_progress', () => {
-    const base = { request_id: 'req-1', trip_id: 'trip-1', ongoing_trip_id: 'ot-1', driver_id: 'drv-1', sent_at: '' };
     const trip = run(requested, message(assigned), message({ ...base, type: 'trip_started', started_at: '' }), message(assigned));
     expect(trip?.phase).toBe('in_progress');
   });
@@ -135,7 +134,7 @@ describe('reduceTrip', () => {
     expect(reduceTrip(cancelled, message(assigned))).toBe(cancelled);
   });
 
-  it('trip_cancelled from the server ends the trip with who and when', () => {
+  it('trip_cancelled from the server (e.g. this rider in another tab) ends the trip', () => {
     const trip = run(
       requested,
       message(assigned),
@@ -144,12 +143,92 @@ describe('reduceTrip', () => {
         request_id: 'req-1',
         trip_id: 'trip-1',
         stage: 'assigned',
-        cancelled_by: 'driver',
+        cancelled_by: 'rider',
         cancelled_at: '',
         sent_at: '',
       }),
     );
-    expect(trip).toMatchObject({ phase: 'cancelled', cancelledBy: 'driver', cancelStage: 'assigned' });
+    expect(trip).toMatchObject({ phase: 'cancelled', cancelledBy: 'rider', cancelStage: 'assigned' });
+  });
+
+  describe('driver cancels and the request is redispatched', () => {
+    const driverCancel = (stage: string): TripEvent =>
+      message({
+        type: 'trip_cancelled',
+        request_id: 'req-1',
+        trip_id: 'trip-1',
+        ongoing_trip_id: 'ot-1',
+        driver_id: 'drv-1',
+        stage,
+        cancelled_by: 'driver',
+        cancelled_at: '',
+        sent_at: '',
+      });
+
+    it('before pickup, goes back to searching and forgets the old driver', () => {
+      const trip = run(requested, message(assigned), message(location(3.145)), driverCancel('assigned'));
+      expect(trip).toMatchObject({ phase: 'searching', searchStatus: 'searching', redispatched: true });
+      expect(trip?.driver).toBeUndefined();
+      expect(trip?.startPin).toBeUndefined();
+      expect(trip?.driverFix).toBeUndefined();
+      expect(trip?.ongoingTripId).toBeUndefined();
+      expect(trip?.pickup.label).toBe('Menara KL');
+      expect(screenForTrip(trip)).toBe('finding');
+    });
+
+    it('the next ride_assigned brings the new driver and a new PIN', () => {
+      const second: RideAssignedMessage = {
+        ...assigned,
+        driver_id: 'drv-2',
+        driver_name: 'Meera Iyer',
+        vehicle_plate: 'SIM2002',
+        start_pin: '9001',
+        driver_lat: undefined,
+        driver_lng: undefined,
+      };
+      const trip = run(requested, message(assigned), driverCancel('assigned'), message(second));
+      expect(trip).toMatchObject({ phase: 'assigned', startPin: '9001', driver: { id: 'drv-2', vehiclePlate: 'SIM2002' } });
+      expect(trip?.driverFix).toBeUndefined(); // not the old driver's position
+      expect(trip?.redispatched).toBe(false);
+    });
+
+    it('mid-trip, the trip is over', () => {
+      const started: TripEvent = message({ ...base, type: 'trip_started', started_at: '' });
+      const trip = run(requested, message(assigned), started, driverCancel('in_progress'));
+      expect(trip).toMatchObject({ phase: 'cancelled', cancelledBy: 'driver', cancelStage: 'in_progress' });
+    });
+
+    it('a reload that missed the message notices the request searching again', () => {
+      const searchingAgain: CurrentTripResponse = {
+        rider_id: 'rider-1',
+        has_active_request: true,
+        has_ongoing_trip: false,
+        trip_request: {
+          request_id: 'req-1',
+          trip_id: 'trip-1',
+          status: 'searching',
+          pickup_lat: PICKUP.lat,
+          pickup_lng: PICKUP.lng,
+          dropoff_lat: DROPOFF.lat,
+          dropoff_lng: DROPOFF.lng,
+          search_radius_km: 20,
+          requested_at: '2026-09-25T10:00:00Z',
+        },
+      };
+      const trip = run(requested, message(assigned), { type: 'snapshot', current: searchingAgain, at: T0 + 9_000 });
+      expect(trip).toMatchObject({ phase: 'searching', redispatched: true });
+      expect(trip?.driver).toBeUndefined();
+    });
+  });
+
+  it('keeps the booked route and the start time for R06', () => {
+    const withRoute: TripEvent = { ...requested, route: { distanceKm: 8.7, durationMinutes: 12, polyline: 'abc' } } as TripEvent;
+    const trip = run(withRoute, message(assigned), message({ ...base, type: 'trip_started', started_at: '2026-09-25T10:05:00Z' }));
+    expect(trip).toMatchObject({
+      phase: 'in_progress',
+      route: { distanceKm: 8.7, durationMinutes: 12, polyline: 'abc' },
+      startedAt: Date.parse('2026-09-25T10:05:00Z'),
+    });
   });
 
   describe('snapshots from GET /cab/current-trip', () => {
