@@ -315,7 +315,7 @@ Each phase ends with something you can run and click through.
 - Drivers are made eligible by editing the local DB (see Decisions §3).
 - **Done when:** an online driver tab, placed in the simulator, shows up in dispatch.
 
-### Phase 3 — Rider booking happy path
+### Phase 3 — Rider booking happy path ✅ (2026-09-26; two drivers offered in ~100ms, rider sees driver move)
 - Login/signup, R01 (places autocomplete via backend proxy), R02 confirm pickup (map pin +
   reverse geocode), R03 tiers from `fare-estimate`, R04 `request-cab` + searching state +
   cancel, R05 `ride_assigned` + live `driver_location` + start PIN.

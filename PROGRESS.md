@@ -4,7 +4,7 @@ The working log for this repo. [PLAN.md](PLAN.md) is the design; this file track
 what's next at task level, and what was learned along the way. Update it at the end of
 every working session and every phase.
 
-**Last updated:** 2026-09-25 · **Current phase:** 3 (not started)
+**Last updated:** 2026-09-26 · **Current phase:** 4 (not started)
 
 ---
 
@@ -15,8 +15,8 @@ every working session and every phase.
 | 0 Foundation | ✅ done 2026-09-25 | `224865b`…`be97d54` | Unit tests (18), `smoke:firefox` 14/14 |
 | 1 Simulator map + location provider | ✅ done 2026-09-25 | `45ee1ce`, `1660776` | Unit tests (24), `smoke:firefox` 19/19 |
 | 2 Driver → receiving offers | ✅ done 2026-09-25 | `05a60d8`…`2b74e76` | Unit tests (77), `smoke:firefox` 26/26 (offer in ~150–250ms) |
-| 3 Rider booking happy path | ⏳ next | — | — |
-| 4 Trip completion + cancellation | ☐ | — | — |
+| 3 Rider booking happy path | ✅ done 2026-09-26 | `94d6ca1`…`d63c85e` | Unit tests (100), `smoke:firefox` 40/40 (offers to 2 drivers in ~80–110ms, driver move → rider map in <5s) |
+| 4 Trip completion + cancellation | ⏳ next | — | — |
 | 5 Simulator power features | ☐ | — | — |
 | 6 Remaining screens | ☐ | — | — |
 
@@ -86,37 +86,67 @@ Run with `docker exec -i go-ride-postgres psql -U postgres -d go_ride -v ON_ERRO
 
 ---
 
-## Next: Phase 3 — Rider booking happy path
+### Phase 3 — Rider booking happy path ✅
+- [x] 3.0 Rendered R01–R07 (`npm run handoff:shots`). **Currency → MYR** (see Decisions): cab-request-handler's
+      local `.env` now has `FARE_CITY_CODE=KUL`, `FARE_CURRENCY_CODE=MYR`; added the missing KUL `RIDE_XL` row (SQL below)
+- [x] 3.1 Rider API layer (`features/rider/api`): types from cab-request-handler + gateway rider messages, `cabClient`
+      (fare-estimate, request-cab with `Idempotency-Key`, cancel, current-trip, trips, rate). Places moved to
+      `shared/places` (both roles, own token); `apiRequest` gained a `headers` option
+- [x] 3.2 Trip reducer (`trip/trip-model.ts`, forward-only phases) + store persisted in `sessionStorage`
+      (`goride:rider-trip`) so driver/vehicle/PIN survive a reload; runtime syncs `current-trip` on every (re)connect and
+      every 4s while searching, looks up vanished trips in `/cab/trips`; follows the trip to R04/R05; simulator activity
+- [x] 3.3 Screens: R01 Where to (Recent from `/cab/trips` + reverse geocode, Suggested KL places, autocomplete while
+      typing, Saved empty), R02 confirm pickup (fixed centre pin; `?for=dropoff` = "Choose on map"), R03 three tiers with
+      route polyline, breakdown, 15-min quote countdown + Refresh, R04 search steps from `trip_requests.status`,
+      "no driver found" with Try again, R05 driver/vehicle/plate/start PIN/live marker + ETA. Account sheet (log out)
+      stands in for R07. Cancel sheet requires a reason on R04 and R05
+- [x] 3.4 Simulator draws each rider's pickup/drop-off and a dashed link from the assigned driver; unit tests for the
+      reducer, quote expiry, idempotency-key reuse; smoke covers the full booking (see Checkpoints)
+- [ ] Not auto-tested: R04 cancel through the UI (same hook as R05's, which is tested); "no driver found" screen
+      (needs every driver offline for the whole dispatch retry window, ~1 min)
 
-**Done when:** a rider books through the web screens (R01 → R04), a driver tab placed nearby
-gets the offer and accepts, and the rider sees R05 with the driver, vehicle, plate, start PIN
-and the driver's position moving when the simulator moves the driver.
+<details><summary>SQL used for 3.0 (idempotent)</summary>
 
-### 3.0 Prep
-- [ ] Render R01–R07 with `npm run handoff:shots -- "../design_handoff_go_ride/Ride Booking Flow v2.dc.html" "01 Where to" …`
-- [ ] Decide the currency question (see Known issues: backend picks the USD fare config)
+```sql
+INSERT INTO fare_configs (city_code, service_type, currency_code, base_fare, per_km_rate, per_minute_rate, minimum_fare, booking_fee, priority, metadata)
+SELECT 'KUL', 'RIDE_XL', 'MYR', 6.50, 2.30, 0.45, 10.00, 1.50, 100,
+       '{"label": "kul-ride-xl-sim", "region": "klang-valley", "country": "MY", "seed_version": "sim"}'
+WHERE NOT EXISTS (SELECT 1 FROM fare_configs WHERE city_code='KUL' AND service_type='RIDE_XL' AND is_active);
+```
+Plus, in `go-ride-kafka-consumers/services/cab-request-handler/.env` (gitignored): `FARE_CITY_CODE=KUL`,
+`FARE_CURRENCY_CODE=MYR`. Restart cab-request-handler after changing it.
+</details>
 
-### 3.1 Rider API layer (`features/rider/api`)
-- [ ] Types from cab-request-handler (`fareQuote`, `createCabRequestResponse`, `currentTripResponse`, cancel response) and websocket-gateway rider messages (`ride_assigned`, `driver_location`, `trip_started`, `trip_ended`, `trip_completed`, `trip_cancelled`)
-- [ ] Clients: `POST /cab/fare-estimate` (returns `quotes[]` for RIDE / RIDE_XL / RIDE_PREMIUM, each with `expires_at`), `POST /cab/request-cab` (`{fare_id}` + `Idempotency-Key` header), `POST /cab/request-cab/{id}/cancel` (reason ∈ rider_absent, rider_requested, vehicle_problem, unsafe_destination, other), `GET /cab/current-trip`, `GET /cab/trips`, `POST /cab/trips/{id}/rate`
-- [ ] Places: `GET /places/autocomplete?input&lat&lng`, `GET /places/:place_id`, `GET /places/reverse-geocode` (auth required, either role)
+---
 
-### 3.2 Rider runtime
-- [ ] Trip state store (`search_started → offered → driver_accepted → assigned → in_progress → completed/cancelled`) fed by ws messages; on reload/reconnect, rebuild from `GET /cab/current-trip` (ongoing trip reports its request under `ongoing_trip`)
-- [ ] Rider's own position = pickup default; simulator activity (searching / driver on the way / on trip)
+## Next: Phase 4 — Trip completion and cancellation
 
-### 3.3 Screens (match `Ride Booking Flow v2.dc.html`; rider theme)
-- [ ] R01 Where to: lilac header, search field with `Later` chip, promo strip, sheet with Recent / Suggested / Saved (Recent from `/cab/trips`, Suggested from autocomplete), "Choose on map" pill
-- [ ] R02 Confirm pickup: full-bleed map, pickup pill, pin with "Nearest entrance" callout, reverse-geocoded place, confirm
-- [ ] R03 Pick a ride: three tiers from fare-estimate with fare breakdown and quote validity; surge shown but no surge UI
-- [ ] R04 Finding a driver: request-cab, searching animation, cancel (reason required)
-- [ ] R05 Driver on the way: driver + vehicle + plate, start PIN, live `driver_location` on the map with distance/ETA
-- [ ] Replace the rider signed-in placeholder with R01
+**Done when:** the full lifecycle (assigned → started with PIN → ended → cash collected → rated) and both cancel paths
+(rider at each stage, driver with redispatch) work end to end in the web screens.
 
-### 3.4 Simulator + tests
-- [ ] Simulator draws each rider's pickup/drop-off pins and the assigned driver link
-- [ ] Unit tests: trip state reducer, quote expiry, idempotency key reuse on retry
-- [ ] Smoke: rider books via UI → driver accepts → rider sees R05 + PIN → moving the driver in the simulator updates the rider's map
+### 4.0 Prep
+- [ ] Render D09, D10 (`Driver App.dc.html`) and R06 (`Ride Booking Flow v2.dc.html`) with `npm run handoff:shots`
+- [ ] Read driver-request-handler's start/end/collect-payment/cancel handlers for request bodies and error codes
+      (PIN mismatch, wrong status); check what `trip_cancelled` the rider gets when the driver cancels at `assigned`
+      (driver-request-handler sets `Redispatch: stage == "assigned"` — the same request goes back to dispatch)
+
+### 4.1 Driver D09 (replaces the temporary TripAssignedScreen)
+- [ ] Trip card with rider pickup/drop-off names, navigate-to-pickup state, **Start with PIN** (`POST /driver-trips/ongoing-trips/{id}/start`)
+- [ ] On trip → **End trip** (`/end`) → cash collection with the final fare → **Cash collected** (`/collect-payment`)
+- [ ] D10 cancel sheet with a reason (`/cancel`), enum reasons like the rider's
+- [ ] Rebuild from `GET /driver-trips/current-trip` on reload; handle rider `trip_cancelled` on the driver socket
+
+### 4.2 Rider side
+- [ ] R06 On trip (replaces TripScreen's `TripStatus` for `in_progress`): route to drop-off, live driver, ETA to drop-off
+- [ ] Awaiting payment (fare due, cash) → completed → rating (`POST /cab/trips/{ongoing_trip_id}/rate`, 1–5 + comment)
+- [ ] **Reducer change:** a driver cancel that redispatches must move the trip back to `searching` (today `cancelled` is
+      final and a later `ride_assigned` for the same request is ignored) — add a test first
+- [ ] Rider cancel during `in_progress` (expect `trip_not_cancellable`?) — confirm and show a readable message
+
+### 4.3 Simulator + tests
+- [ ] Simulator: driver link switches to pickup → drop-off once the trip starts
+- [ ] Unit tests: redispatch in the reducer, D09 state machine
+- [ ] Smoke: start with PIN → end → collect → rider rates; driver cancel → rider sees searching again → second driver accepts
 - [ ] Commit per sub-area, push, update this file
 
 ## Decisions log
@@ -135,6 +165,13 @@ and the driver's position moving when the simulator moves the driver.
 | 2026-09-25 | D06 online state (status, pause, offers waiting) designed in-app | Handoff only designs the offline state |
 | 2026-09-25 | D08 place names via backend reverse-geocode; no category pill | Offer message has only coordinates and no service type |
 | 2026-09-25 | Menu rows for verification/vehicles/profile shown but not navigable | Those screens are Phase 6 |
+| 2026-09-26 | Fares in **MYR**: cab-request-handler local `.env` `FARE_CITY_CODE=KUL` + KUL `RIDE_XL` row | Design shows RM; KUL rows already existed in MYR. No code change, only local config + data |
+| 2026-09-26 | Rider trip kept in `sessionStorage`, rebuilt from `current-trip` | `ride_assigned` is never replayed and `current-trip` has no driver name/vehicle |
+| 2026-09-26 | Poll `current-trip` every 4s while searching | Dispatch timeouts are never pushed to the rider |
+| 2026-09-26 | R01 Suggested = fixed list of KL places | Fast test bookings; autocomplete covers everything else |
+| 2026-09-26 | R01's back arrow → account button + sheet (log out) | R01 is the rider home; R07 profile is Phase 6 |
+| 2026-09-26 | R04 steps follow `trip_requests.status`, not per-driver rows | Riders aren't told which drivers are offered |
+| 2026-09-26 | Call/Message/Share, Later, For me, promo shown but inert | No backend support; kept for visual fidelity |
 
 ## Gotchas learned
 
@@ -159,6 +196,14 @@ and the driver's position moving when the simulator moves the driver.
 - **StrictMode + one-shot effects:** read "already done" flags from the store inside the effect,
   not from props — the re-run sees a stale prop (caused a double ack).
 - **zsh:** don't name a shell variable `path` — it's tied to `PATH`.
+- **Rider messages aren't replayed** — only driver offers are. Sync over HTTP after every reconnect.
+- **Timeouts aren't pushed**: a search that times out just disappears from `current-trip`; `/cab/trips` has
+  `status: timed_out`.
+- **Dispatch fans out** to the nearest 10 eligible drivers at once (`NEAREST_DRIVERS_LIMIT`), offer TTL 15s.
+- **TanStack `mutate(…, {onSuccess})` callbacks are dropped if the component unmounts** first; put must-run
+  follow-ups (clear trip + navigate) in the `useMutation` options instead.
+- **"Where to?" is a placeholder**, not text — tests wait for "Choose on map" to know R01 is up.
+- **`@types/google.maps`** must be listed in tsconfig `types` to use `google.maps.*` in our code.
 - **Dispatch eligibility** (trip-dispatch-worker): `is_online AND NOT is_paused`, active vehicle,
   location `recorded_at` within 300s, within 20→30 km, tier (RIDE any / RIDE_XL ≥6 seats /
   RIDE_PREMIUM luxury), no ongoing trip, didn't cancel this request before.
@@ -171,7 +216,9 @@ and the driver's position moving when the simulator moves the driver.
   If Kafka/Postgres go down, the consumers exit — restart the stack.
 - Test accounts (password `password123`): riders `sim.rider1|2@goride.test`, drivers
   `sim.driver1|2|3@goride.test` — drivers are KYC-approved with active vehicles (Phase 2.1).
-- Smoke test resets driver1 offline and cancels rider1's active trip before and after it runs.
+- Smoke test resets drivers 1–2 offline and cancels rider1's active trip before and after it runs.
+- cab-request-handler prices in MYR only because of its local `.env` (see Phase 3 SQL block) — a fresh checkout
+  falls back to `DEFAULT`/USD.
 - `npm run handoff:shots -- <dc.html> "<screen label>"…` renders design screens for comparison.
 - Maps key: GCP project `go-ride-dev-504212`, key id `52b9aa5c-f166-48c9-ae36-32b1b4fb8915`,
   value only in `.env` (gitignored).
@@ -180,8 +227,10 @@ and the driver's position moving when the simulator moves the driver.
 
 - `location-consumers` health endpoint on `:8085` didn't answer (the consumer itself is running) — check its config if needed.
 - Home page and simulator use a few literal rider/driver hex colours outside the themed phone frame.
-- **Currency:** fare-estimate returns USD — `fare_configs` has both USD and MYR rows and the backend
-  picks USD. The design assumes RM (MYR). UI shows whatever the backend sends; decide in Phase 3.0.
+- ~~Currency~~ — resolved 2026-09-26 (MYR via KUL fare configs).
+- Rider cancel reasons map to the enum (`rider_requested`/`other`) with the wording in `note`; the backend has no
+  rider-specific reasons.
+- Simulator actor labels overlap when a rider and driver stand close together.
 - D04/D05 screens (verification, vehicles) and D09–D11 not built yet (Phases 4 and 6).
 - Car movement along a route (asked for 2026-09-25) stays in Phase 5 as planned; until then move
   drivers by clicking/dragging in the simulator.

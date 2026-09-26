@@ -6,9 +6,9 @@ phases, and [PROGRESS.md](PROGRESS.md) for checkpoints and the next tasks.
 
 | Route | What it is |
 |---|---|
-| `/user` | Rider app (phone frame, rider theme) |
+| `/user` | Rider app (phone frame, rider theme): where to (R01), confirm pickup (R02), pick a ride (R03), finding a driver (R04), driver on the way (R05) |
 | `/driver` | Driver app (phone frame, driver theme): home/go online (D06–D07), menu (D03), job offers (D08) |
-| `/simulator` | Every open tab on a Google map — select a tab and click the map (or drag its marker) to move its GPS |
+| `/simulator` | Every open tab on a Google map — select a tab and click the map (or drag its marker) to move its GPS. Riders' live trips show pickup/drop-off pins and a link to the assigned driver |
 | `/health` | Pings every Go service through the dev proxy |
 
 Every tab is its own device: its own login (in `sessionStorage`), its own websocket
@@ -57,7 +57,11 @@ Password for all: `password123`
 The drivers are KYC-approved with one active vehicle each (driver1 Ride, driver2 also Ride XL,
 driver3 also Ride Premium) — set directly in the local DB; the SQL is in
 [PROGRESS.md](PROGRESS.md). To try dispatch: open a driver tab, place it in the simulator, go
-online, then book a ride nearby as a rider.
+online; open a rider tab, place it nearby, pick a destination and book. Moving the driver in the
+simulator moves it on the rider's R05 map.
+
+Fares are in MYR because cab-request-handler's local `.env` sets `FARE_CITY_CODE=KUL` (see
+PROGRESS.md, Phase 3); without it the backend prices in USD.
 
 ## Checks
 
@@ -71,7 +75,9 @@ npm run handoff:shots -- "../design_handoff_go_ride/Driver App.dc.html" "08 Job 
 
 `smoke:firefox` uses `puppeteer-core` over WebDriver BiDi with
 `/Applications/Firefox.app` (override with `FIREFOX_PATH`; `SMOKE_HEADFUL=1` to watch).
-It covers per-tab sessions, the simulator map, and the driver flow end to end (go online →
-location ping in the DB → rider request → offer card → seen-ack → accept). It resets driver1
-offline and cancels rider1's active trip before and after running. Screenshots land in
+It covers per-tab sessions, the simulator map, the driver flow (go online → location ping in
+the DB → offer card → seen-ack → accept) and the rider booking (R01 → R04 → both online drivers
+get the offer → one accepts, the other sees "taken" → R05 with plate and start PIN → a simulator
+move reaches the rider's map → cancel with a reason). It resets drivers 1–2 offline and cancels
+rider1's active trip before and after running. Screenshots land in
 `test-results/smoke/`; handoff renders in `test-results/handoff/`.
