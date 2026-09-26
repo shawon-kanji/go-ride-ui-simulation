@@ -322,7 +322,7 @@ Each phase ends with something you can run and click through.
 - **Done when:** a rider request produces offers in 2+ driver tabs, one accepts, the other's
   card goes to "taken", and the rider sees the driver moving.
 
-### Phase 4 — Trip completion and cancellation (next; research done 2026-09-26)
+### Phase 4 — Trip completion and cancellation ✅ (2026-09-26; full lifecycle, redispatch and rider cancel mid-trip in the smoke test)
 - Driver D09: heading to pickup and start with the rider's PIN (designed in-app), then on trip → End trip → Cash
   collected. D10 cancel with a reason; a cancel before pickup sends the request back into dispatch.
 - Rider R06 on trip, with progress **estimated** from the booked route because the gateway stops `driver_location`
@@ -332,7 +332,7 @@ Each phase ends with something you can run and click through.
 - The full task list, backend state machine and error codes are in PROGRESS.md.
 - **Done when:** the full lifecycle and both cancel paths work end to end.
 
-### Phase 5 — Simulator power features
+### Phase 5 — Simulator power features (next)
 - Route playback (to pickup/drop-off, drawn paths, speed), quick setup, saved layouts.
 - Merged event timeline with filters; trip inspector.
 - **Done when:** one click drives the assigned driver to pickup and the rider's ETA counts down.

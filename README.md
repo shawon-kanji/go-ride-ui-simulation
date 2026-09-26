@@ -6,8 +6,8 @@ phases, and [PROGRESS.md](PROGRESS.md) for checkpoints and the next tasks.
 
 | Route | What it is |
 |---|---|
-| `/user` | Rider app (phone frame, rider theme): where to (R01), confirm pickup (R02), pick a ride (R03), finding a driver (R04), driver on the way (R05) |
-| `/driver` | Driver app (phone frame, driver theme): home/go online (D06–D07), menu (D03), job offers (D08) |
+| `/user` | Rider app (phone frame, rider theme): where to (R01), confirm pickup (R02), pick a ride (R03), finding a driver (R04), driver on the way (R05), on trip (R06), pay your driver, trip complete + rating |
+| `/driver` | Driver app (phone frame, driver theme): home/go online (D06–D07), menu (D03), job offers (D08), trip with start PIN and cash collection (D09), cancel with a reason (D10) |
 | `/simulator` | Every open tab on a Google map — select a tab and click the map (or drag its marker) to move its GPS. The search box (top left) jumps to a place; with a tab selected, “Move … here” puts it there. Riders' live trips show pickup/drop-off pins and a link to the assigned driver |
 | `/health` | Pings every Go service through the dev proxy |
 
@@ -78,6 +78,7 @@ npm run handoff:shots -- "../design_handoff_go_ride/Driver App.dc.html" "08 Job 
 It covers per-tab sessions, the simulator map, the driver flow (go online → location ping in
 the DB → offer card → seen-ack → accept) and the rider booking (R01 → R04 → both online drivers
 get the offer → one accepts, the other sees "taken" → R05 with plate and start PIN → a simulator
-move reaches the rider's map → cancel with a reason). It resets drivers 1–2 offline and cancels
-rider1's active trip before and after running. Screenshots land in
+move reaches the rider's map), and the trip lifecycle (driver 1 cancels → redispatch to driver 2 →
+wrong/right start PIN → R06 → end → pay → collect → rating; then a rider cancel mid-trip). It resets
+drivers 1–2 offline (settling any trip left mid-way) and cancels rider1's active trip before and after running. Screenshots land in
 `test-results/smoke/`; handoff renders in `test-results/handoff/`.
