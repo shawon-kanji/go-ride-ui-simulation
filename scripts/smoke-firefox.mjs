@@ -10,7 +10,10 @@
 // location pings reach driver_locations. Phase 3: the rider books through R01 → R04,
 // both online drivers get the offer, driver 1 accepts and driver 2's card goes to
 // "taken", the rider sees R05 (driver, plate, start PIN), moving driver 1 in the
-// simulator moves it on the rider's map, and the rider cancels from R05 with a reason.
+// simulator moves it on the rider's map. Phase 4: driver 1 cancels before pickup (D10)
+// and the request is redispatched to driver 2; driver 2 starts with the PIN (a wrong one
+// is rejected), ends, collects cash; the rider sees R06, pays and rates; then a second
+// booking the rider cancels mid-trip.
 // Needs the Go stack and the go-ride-postgres container. Screenshots go to SMOKE_OUT
 // (default ./test-results/smoke).
 
@@ -90,10 +93,19 @@ async function apiLogin(role, email) {
   return json.access_token;
 }
 
-/** Leaves both drivers offline and rider 1 with no active request, whatever a previous run did. */
+/** Leaves both drivers offline with no trip and rider 1 with no active request, whatever a previous run did. */
 async function resetState() {
   for (const email of [ACCOUNTS.driver1, ACCOUNTS.driver2]) {
     const driverToken = await apiLogin('driver', email);
+    // A trip left mid-way keeps that driver out of dispatch. awaiting_payment can't be
+    // cancelled by anyone, so it's collected instead.
+    const { json: trip } = await api('/api/v1/driver-trips/current-trip', { token: driverToken });
+    const ongoing = trip?.ongoing_trip;
+    if (ongoing?.status === 'awaiting_payment') {
+      await api(`/api/v1/driver-trips/ongoing-trips/${ongoing.trip_record_id}/collect-payment`, { method: 'POST', token: driverToken });
+    } else if (ongoing) {
+      await api(`/api/v1/driver-trips/ongoing-trips/${ongoing.trip_record_id}/cancel`, { method: 'POST', token: driverToken, body: { reason: 'other', note: 'smoke test cleanup' } });
+    }
     await api('/api/v1/driver/online', { method: 'PATCH', body: { is_online: false }, token: driverToken });
   }
   const riderToken = await apiLogin('rider', ACCOUNTS.rider1);
@@ -121,6 +133,39 @@ const placeTab = (sim, id, lat, lng) =>
   sim.evaluate((msg) => new BroadcastChannel('goride-sim').postMessage(msg), { type: 'set-location', tabId: id, lat, lng });
 
 const riderTrip = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem('goride:rider-trip') ?? 'null'));
+
+/** Types into D09's hidden PIN field, replacing whatever is there. */
+async function enterPin(page, pin) {
+  await page.evaluate(() => document.querySelector('[data-testid="start-pin-input"]').focus());
+  for (let i = 0; i < 4; i++) await page.keyboard.press('Backspace');
+  await page.type('[data-testid="start-pin-input"]', pin);
+}
+
+/** R01 → R02 → R03 → Book, using the Suggested row at `index`. */
+async function bookFromR01(page, index = 1) {
+  await page.bringToFront();
+  await page.waitForSelector('[data-testid="suggested-place"]');
+  await (await page.$$('[data-testid="suggested-place"]'))[index].click();
+  await page.waitForFunction(
+    () => {
+      const t = document.querySelector('[data-testid="pin-place"]')?.textContent ?? '';
+      return t !== '' && !/Finding|Moving/.test(t);
+    },
+    { timeout: 15_000 },
+  );
+  await (await page.waitForSelector(buttonXPath('Choose this pickup'))).click();
+  await page.waitForSelector('[data-testid="tier-RIDE"]', { timeout: 15_000 });
+  await (await page.waitForSelector('xpath/.//button[starts-with(normalize-space(), "Book Standard") and not(@disabled)]')).click();
+  await page.waitForSelector('[data-testid="finding-headline"]', { timeout: 10_000 });
+}
+
+/** Waits for a live offer in a driver tab and accepts it. */
+async function acceptOffer(page) {
+  await page.bringToFront();
+  await page.waitForSelector('[data-testid="offer-card"][data-state="live"]', { timeout: 30_000 });
+  await (await page.waitForSelector(buttonXPath('Accept', '//article[@data-testid="offer-card"]'))).click();
+  await page.waitForSelector('[data-testid="start-pin-input"]', { timeout: 10_000 });
+}
 
 async function newPage(browser) {
   const page = await browser.newPage();
@@ -377,19 +422,129 @@ try {
     check('R05 survives a reload', (await r1.$eval('[data-testid="vehicle-plate"]', (el) => el.textContent)) === 'SIM1001');
     await r1.screenshot({ path: `${OUT}/15-rider-driver-moved.png` });
 
-    // Rider cancels from R05; a reason is required.
+    // Phase 4 — driver 1 cancels before pickup (D10); the request goes back to dispatch.
+    const riderToken1 = riderToken;
+    await d1.bringToFront();
+    await (await d1.waitForSelector(buttonXPath('Cancel trip'))).click();
+    await d1.waitForSelector('[role=dialog]');
+    check('D10 needs a reason first', !(await d1.$(buttonXPath('Cancel trip', '//*[@role="dialog"]'))));
+    await (await d1.waitForSelector('[role=dialog] [role=radio]')).click();
+    await d1.type('[role=dialog] textarea', 'smoke: rider not at pickup');
+    await d1.screenshot({ path: `${OUT}/16-driver-cancel-reason.png` });
+    await (await d1.waitForSelector(buttonXPath('Cancel trip', '//*[@role="dialog"]'))).click();
+    await d1.waitForSelector('[data-testid="trip-ended"]', { timeout: 10_000 });
+    check('driver 1 sees the trip went back to dispatch', (await bodyText(d1)).includes('back into dispatch'));
+
+    // Offers live 15s, so driver 2 accepts first; the rider's trip went back to
+    // searching in between (its dev log records every trip transition).
+    await acceptOffer(d2);
+    check('driver 2 wins the redispatched trip', true);
+    const d1Offers = sql(`select count(*) from driver_job_offers where driver_id = '${driverId}' and request_id = '${requestId}'`);
+    check('driver 1 is not offered the trip again', d1Offers === '1', `${d1Offers} offer(s) to driver 1`);
     await r1.bringToFront();
-    await (await r1.waitForSelector(buttonXPath('Cancel'))).click();
-    await r1.waitForSelector('[role=dialog]');
-    check('cancel needs a reason first', !(await r1.$(buttonXPath('Cancel ride', '//*[@role="dialog"]'))));
-    await (await r1.waitForSelector('[role=dialog] [role=radio]')).click();
-    await (await r1.waitForSelector(buttonXPath('Cancel ride', '//*[@role="dialog"]'))).click();
-    await r1.waitForSelector('[data-testid="suggested-place"]', { timeout: 10_000 }).then(
-      () => check('rider cancel returns to R01', true),
-      () => check('rider cancel returns to R01', false),
+    check('rider went back to searching (“finding you another driver”)', (await bodyText(r1)).includes('trip assigned → searching'));
+    await r1.waitForFunction(() => document.querySelector('[data-testid="vehicle-plate"]')?.textContent === 'SIM2002', { timeout: 10_000 }).then(
+      () => check('rider R05 shows driver 2 and their plate', true),
+      () => check('rider R05 shows driver 2 and their plate', false),
     );
-    const after = await api('/api/v1/cab/current-trip', { token: riderToken });
-    check('server has no live trip after the cancel', !after.json?.has_active_request && !after.json?.has_ongoing_trip);
+    const pin2 = (await r1.$eval('[data-testid="start-pin"]', (el) => el.textContent)).trim();
+    const serverPin2 = (await api('/api/v1/cab/current-trip', { token: riderToken1 })).json?.ongoing_trip?.start_pin;
+    check('R05 shows the new start PIN', /^\d{4}$/.test(pin2) && pin2 === serverPin2, `${pin2} (was ${shownPin})`);
+    await r1.screenshot({ path: `${OUT}/17-rider-new-driver.png` });
+
+    // Happy path with driver 2: PIN → R06 → end → pay → collect → rate.
+    const d2Token = await apiLogin('driver', ACCOUNTS.driver2);
+    const earningsBefore = (await api('/api/v1/driver-trips/earnings?period=today', { token: d2Token })).json?.total_earnings ?? 0;
+    const ratingsBefore = (await api('/api/v1/driver-trips/stats', { token: d2Token })).json?.rating_count ?? 0;
+    await d2.bringToFront();
+    check('D09 shows the rider’s name', ((await d2.$eval('[data-testid="trip-rider"]', (el) => el.textContent)) ?? '').length > 0 && !(await bodyText(d2)).includes('Your rider'));
+    await enterPin(d2, pin2 === '0000' ? '1111' : '0000');
+    await (await d2.waitForSelector(buttonXPath('Start trip'))).click();
+    await waitForText(d2, 'doesn’t match').then(
+      () => check('a wrong start PIN is rejected', true),
+      () => check('a wrong start PIN is rejected', false),
+    );
+    await enterPin(d2, pin2);
+    await (await d2.waitForSelector(buttonXPath('Start trip'))).click();
+    await d2.waitForSelector('[data-testid="collect-fare"]', { timeout: 10_000 }).then(
+      () => check('the right PIN starts the trip', true),
+      () => check('the right PIN starts the trip', false),
+    );
+    await d2.screenshot({ path: `${OUT}/19-driver-on-trip.png` });
+    await r1.bringToFront();
+    await r1.waitForSelector('[data-testid="arrival-clock"]', { timeout: 10_000 }).then(
+      () => check('rider sees R06 on trip', true),
+      () => check('rider sees R06 on trip', false),
+    );
+    await r1.screenshot({ path: `${OUT}/20-rider-on-trip.png` });
+
+    await d2.bringToFront();
+    check('Cash collected is locked until the trip ends', !(await d2.$(buttonXPath('Cash collected'))));
+    await (await d2.waitForSelector(buttonXPath('End trip'))).click();
+    await d2.waitForSelector(buttonXPath('Cash collected'), { timeout: 10_000 });
+    await r1.bringToFront();
+    await r1.waitForSelector('[data-testid="pay-driver"]', { timeout: 10_000 }).then(
+      () => check('rider is asked to pay in cash', true),
+      () => check('rider is asked to pay in cash', false),
+    );
+    await r1.screenshot({ path: `${OUT}/21-rider-pay.png` });
+
+    await d2.bringToFront();
+    await (await d2.waitForSelector(buttonXPath('Cash collected'))).click();
+    await d2.waitForFunction(() => document.querySelector('[data-testid="trip-ended"]')?.textContent === 'Trip complete', { timeout: 10_000 }).then(
+      () => check('driver completes the trip', true),
+      () => check('driver completes the trip', false),
+    );
+    await d2.screenshot({ path: `${OUT}/22-driver-complete.png` });
+
+    await r1.bringToFront();
+    await r1.waitForSelector('[data-testid="trip-complete"]', { timeout: 10_000 });
+    await r1.click('[role=radiogroup][aria-label="Rating"] [aria-label="5 stars"]');
+    await r1.type('textarea[aria-label="Comment"]', 'smoke test ride');
+    await r1.screenshot({ path: `${OUT}/23-rider-rate.png` });
+    await (await r1.waitForSelector(buttonXPath('Submit rating'))).click();
+    await r1.waitForSelector('[data-testid="suggested-place"]', { timeout: 10_000 }).then(
+      () => check('rating returns the rider to R01', true),
+      () => check('rating returns the rider to R01', false),
+    );
+    const history = await api('/api/v1/cab/trips?limit=5', { token: riderToken1 });
+    const finished = history.json?.trips?.find((t) => t.request_id === requestId);
+    check('rider history shows the trip completed', finished?.status === 'completed', finished?.status ?? 'missing');
+    const earningsAfter = (await api('/api/v1/driver-trips/earnings?period=today', { token: d2Token })).json?.total_earnings ?? 0;
+    check('driver 2’s earnings include the fare', earningsAfter > earningsBefore, `${earningsBefore} → ${earningsAfter}`);
+    const ratingsAfter = (await api('/api/v1/driver-trips/stats', { token: d2Token })).json?.rating_count ?? 0;
+    check('the rating reaches driver 2', ratingsAfter === ratingsBefore + 1, `${ratingsBefore} → ${ratingsAfter}`);
+    await (await d2.waitForSelector(buttonXPath('Back to map'))).click();
+    requestId = null;
+
+    // Second booking: the rider cancels mid-trip from R06.
+    await api('/api/v1/driver/online', { method: 'PATCH', body: { is_online: false }, token: await apiLogin('driver', ACCOUNTS.driver1) });
+    await bookFromR01(r1, 2);
+    requestId = (await riderTrip(r1))?.requestId ?? null;
+    await acceptOffer(d2);
+    await r1.bringToFront();
+    await r1.waitForSelector('[data-testid="start-pin"]', { timeout: 10_000 });
+    const pin3 = (await r1.$eval('[data-testid="start-pin"]', (el) => el.textContent)).trim();
+    await d2.bringToFront();
+    await enterPin(d2, pin3);
+    await (await d2.waitForSelector(buttonXPath('Start trip'))).click();
+    await d2.waitForSelector('[data-testid="collect-fare"]', { timeout: 10_000 });
+    await r1.bringToFront();
+    await r1.waitForSelector('[data-testid="arrival-clock"]', { timeout: 10_000 });
+    await (await r1.waitForSelector('xpath/.//button[normalize-space()="Cancel trip"]')).click();
+    await r1.waitForSelector('[role=dialog]');
+    await (await r1.waitForSelector('[role=dialog] [role=radio]')).click();
+    await (await r1.waitForSelector(buttonXPath('Cancel trip', '//*[@role="dialog"]'))).click();
+    await r1.waitForSelector('[data-testid="suggested-place"]', { timeout: 10_000 }).then(
+      () => check('rider cancels mid-trip from R06', true),
+      () => check('rider cancels mid-trip from R06', false),
+    );
+    await d2.bringToFront();
+    await d2.waitForFunction(() => document.querySelector('[data-testid="trip-ended"]')?.textContent === 'The rider cancelled', { timeout: 10_000 }).then(
+      () => check('driver 2 sees the rider cancelled', true),
+      () => check('driver 2 sees the rider cancelled', false),
+    );
+    await d2.screenshot({ path: `${OUT}/24-driver-rider-cancelled.png` });
     requestId = null;
   } finally {
     // Cancel as the rider if the run stopped half way, then take both drivers offline.
