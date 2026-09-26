@@ -7,8 +7,10 @@
 // browser), reload keeps a tab signed in, a duplicated tab starts signed out as a new
 // device, websockets open for every tab, and the simulator sees every tab on the bus.
 // Phase 1: simulator map click moves a tab. Phase 2: a driver goes online (D06 → D07),
-// location pings reach driver_locations, a rider request nearby (made over HTTP until
-// the rider screens exist) becomes an offer card, the seen-ack lands, Accept wins.
+// location pings reach driver_locations. Phase 3: the rider books through R01 → R04,
+// both online drivers get the offer, driver 1 accepts and driver 2's card goes to
+// "taken", the rider sees R05 (driver, plate, start PIN), moving driver 1 in the
+// simulator moves it on the rider's map, and the rider cancels from R05 with a reason.
 // Needs the Go stack and the go-ride-postgres container. Screenshots go to SMOKE_OUT
 // (default ./test-results/smoke).
 
@@ -26,10 +28,9 @@ const ACCOUNTS = {
   rider1: process.env.SMOKE_RIDER1 ?? 'sim.rider1@goride.test',
 };
 
-// Text that only appears once a tab is signed in: the driver home's stat card, the
-// rider's temporary signed-in screen.
+// Text that only appears once a tab is signed in: the driver home's stat card, R01.
 const DRIVER_HOME = 'Online time';
-const RIDER_HOME = 'Signed in';
+const RIDER_HOME = 'Choose on map';
 
 const results = [];
 function check(name, ok, detail = '') {
@@ -89,10 +90,12 @@ async function apiLogin(role, email) {
   return json.access_token;
 }
 
-/** Leaves driver 1 offline and rider 1 with no active request, whatever a previous run did. */
+/** Leaves both drivers offline and rider 1 with no active request, whatever a previous run did. */
 async function resetState() {
-  const driverToken = await apiLogin('driver', ACCOUNTS.driver1);
-  await api('/api/v1/driver/online', { method: 'PATCH', body: { is_online: false }, token: driverToken });
+  for (const email of [ACCOUNTS.driver1, ACCOUNTS.driver2]) {
+    const driverToken = await apiLogin('driver', email);
+    await api('/api/v1/driver/online', { method: 'PATCH', body: { is_online: false }, token: driverToken });
+  }
   const riderToken = await apiLogin('rider', ACCOUNTS.rider1);
   const { json: current } = await api('/api/v1/cab/current-trip', { token: riderToken });
   // An ongoing trip reports its request under ongoing_trip; a search under trip_request.
@@ -103,6 +106,21 @@ async function resetState() {
 }
 
 const buttonXPath = (label, scope = '') => `xpath/.${scope}//button[normalize-space()="${label}" and not(@disabled)]`;
+
+/** D06 → D07 → online. */
+async function goOnline(page) {
+  await page.bringToFront();
+  await (await page.waitForSelector(buttonXPath('Go online'), { timeout: 10_000 })).click();
+  await page.waitForSelector('[role=dialog]');
+  await (await page.waitForSelector(buttonXPath('Go online', '//*[@role="dialog"]'))).click();
+  await waitForText(page, "You're online");
+}
+
+/** Moves a tab exactly as the simulator does: a set-location message on the bus. */
+const placeTab = (sim, id, lat, lng) =>
+  sim.evaluate((msg) => new BroadcastChannel('goride-sim').postMessage(msg), { type: 'set-location', tabId: id, lat, lng });
+
+const riderTrip = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem('goride:rider-trip') ?? 'null'));
 
 async function newPage(browser) {
   const page = await browser.newPage();
@@ -215,10 +233,10 @@ try {
   await d1.screenshot({ path: `${OUT}/05a-driver-placed.png` });
   await sim.screenshot({ path: `${OUT}/05-simulator.png` });
 
-  // 6c. Phase 2: driver 1 goes online through D06 → D07, location pings reach the
-  //     database, a rider request nearby becomes an offer card, Accept wins the trip.
+  // 6c. Phase 2: driver 1 goes online through D06 → D07 and location pings reach the
+  //     database. Phase 3: driver 2 goes online nearby too, rider 1 books through the
+  //     rider screens, both drivers get the offer, driver 1 wins.
   let requestId = null;
-  let riderToken = null;
   try {
     const driverId = await d1.evaluate(() => JSON.parse(sessionStorage.getItem('goride:session:driver')).user.id);
     await d1.bringToFront();
@@ -238,29 +256,55 @@ try {
     check('location ping reaches driver_locations', Number(fresh) > 0, `${fresh} fresh row(s)`);
     await d1.screenshot({ path: `${OUT}/06-driver-online.png` });
 
-    // Rider 1 books a ride starting ~200m from the driver (HTTP until Phase 3's screens).
+    // Driver 2 ~300m from driver 1, rider ~200m from driver 1 — both drivers qualify for RIDE.
     const where = await d1.evaluate(() => JSON.parse(sessionStorage.getItem('goride:location')).simulated);
-    riderToken = await apiLogin('rider', ACCOUNTS.rider1);
-    const estimate = await api('/api/v1/cab/fare-estimate', {
-      method: 'POST',
-      token: riderToken,
-      body: { pickup_lat: where.lat + 0.0015, pickup_lng: where.lng + 0.001, dropoff_lat: where.lat + 0.025, dropoff_lng: where.lng + 0.02 },
-    });
-    const quote = estimate.json?.quotes?.find((q) => q.service_type === 'RIDE');
-    const booked = await api('/api/v1/cab/request-cab', {
-      method: 'POST',
-      token: riderToken,
-      headers: { 'Idempotency-Key': `smoke-${Date.now()}` },
-      body: { fare_id: quote?.fare_id },
-    });
-    requestId = booked.json?.request_id ?? null;
-    check('rider request is accepted by cab-request-handler', booked.status < 300 && !!requestId, `HTTP ${booked.status}`);
+    await placeTab(sim, await tabId(d2), where.lat - 0.002, where.lng + 0.002);
+    await d2.waitForFunction(() => !!JSON.parse(sessionStorage.getItem('goride:location') ?? '{}').simulated, { timeout: 5_000 });
+    await goOnline(d2);
+    await placeTab(sim, await tabId(r1), where.lat + 0.0015, where.lng + 0.001);
+
+    // R01 → R02 → R03 → Book.
+    await r1.bringToFront();
+    await r1.goto(`${BASE}/user`);
+    await r1.waitForSelector('[data-testid="suggested-place"]');
+    await r1.screenshot({ path: `${OUT}/09-rider-where-to.png` });
+    await (await r1.$$('[data-testid="suggested-place"]'))[1].click();
+    await r1.waitForFunction(
+      () => {
+        const t = document.querySelector('[data-testid="pin-place"]')?.textContent ?? '';
+        return t !== '' && !/Finding|Moving/.test(t);
+      },
+      { timeout: 15_000 },
+    );
+    check('R02 names the pickup under the pin', true, await r1.$eval('[data-testid="pin-place"]', (el) => el.textContent));
+    await r1.screenshot({ path: `${OUT}/10-rider-confirm-pickup.png` });
+    await (await r1.waitForSelector(buttonXPath('Choose this pickup'))).click();
+
+    await r1.waitForSelector('[data-testid="tier-RIDE"]', { timeout: 15_000 });
+    const prices = (await bodyText(r1)).match(/RM \d+\.\d{2}/g) ?? [];
+    check('R03 shows three MYR tiers', (await r1.$$('[role=radiogroup] [data-testid^="tier-"]')).length === 3 && prices.length >= 3, prices.slice(0, 3).join(' / '));
+    await r1.screenshot({ path: `${OUT}/11-rider-pick-ride.png` });
+    await (await r1.waitForSelector('xpath/.//button[starts-with(normalize-space(), "Book Standard") and not(@disabled)]')).click();
+
+    await r1.waitForSelector('[data-testid="finding-headline"]', { timeout: 10_000 }).then(
+      () => check('booking opens R04 Finding a driver', true),
+      () => check('booking opens R04 Finding a driver', false),
+    );
+    requestId = (await riderTrip(r1))?.requestId ?? null;
+    check('request-cab created a request', !!requestId, requestId ?? '');
+    await r1.screenshot({ path: `${OUT}/12-rider-finding.png` });
 
     const bookedAt = Date.now();
-    await d1.waitForSelector('[data-testid="offer-card"][data-state="live"]', { timeout: 30_000 }).then(
-      () => check('offer card appears in the driver tab', true, `${Date.now() - bookedAt}ms after booking`),
-      () => check('offer card appears in the driver tab', false),
+    const [offer1, offer2] = await Promise.all(
+      [d1, d2].map((page) =>
+        page.waitForSelector('[data-testid="offer-card"][data-state="live"]', { timeout: 30_000 }).then(
+          () => Date.now() - bookedAt,
+          () => null,
+        ),
+      ),
     );
+    check('offer card appears in driver 1', offer1 !== null, `${offer1}ms after booking`);
+    check('offer card appears in driver 2', offer2 !== null, `${offer2}ms after booking`);
     check('driver tab opens D08 on arrival', d1.url().endsWith('/driver/offers'), d1.url());
     const delivery = await pollSql(
       `select delivery_status from driver_job_offers where driver_id = '${driverId}' order by created_at desc limit 1`,
@@ -271,19 +315,85 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 1_500)); // let place names load
     await d1.screenshot({ path: `${OUT}/07-driver-offers.png` });
 
+    await d1.bringToFront();
     await (await d1.waitForSelector(buttonXPath('Accept', '//article[@data-testid="offer-card"]'))).click();
     await waitForText(d1, 'Trip assigned').then(
       () => check('accepting wins the trip', true),
       () => check('accepting wins the trip', false),
     );
     await d1.screenshot({ path: `${OUT}/08-driver-trip-assigned.png` });
+    await d2.waitForSelector('[data-testid="offer-card"][data-state="taken"]', { timeout: 10_000 }).then(
+      () => check("driver 2's card goes to taken", true),
+      () => check("driver 2's card goes to taken", false),
+    );
+    await d2.screenshot({ path: `${OUT}/08b-driver2-taken.png` });
+
+    // R05: driver, vehicle, plate and the same start PIN the server holds.
+    await r1.bringToFront();
+    await r1.waitForSelector('[data-testid="vehicle-plate"]', { timeout: 10_000 });
+    const plate = await r1.$eval('[data-testid="vehicle-plate"]', (el) => el.textContent);
+    check('R05 shows the driver and plate', plate === 'SIM1001' && (await bodyText(r1)).includes('Perodua Myvi'), plate);
+    const shownPin = (await r1.$eval('[data-testid="start-pin"]', (el) => el.textContent)).trim();
+    const riderToken = await apiLogin('rider', ACCOUNTS.rider1);
+    const serverPin = (await api('/api/v1/cab/current-trip', { token: riderToken })).json?.ongoing_trip?.start_pin;
+    check('R05 start PIN matches the server', /^\d{4}$/.test(shownPin) && shownPin === serverPin, shownPin);
+    await r1.screenshot({ path: `${OUT}/13-rider-driver-on-the-way.png` });
+
+    // The simulator draws the trip, then moves driver 1 towards the pickup.
+    await sim.bringToFront();
+    await sim.waitForSelector('[title*="’s pickup"]', { timeout: 6_000 }).then(
+      () => check('simulator draws the rider’s pickup and drop-off', true),
+      () => check('simulator draws the rider’s pickup and drop-off', false),
+    );
+    await sim.screenshot({ path: `${OUT}/14-simulator-trip.png` });
+    const target = { lat: where.lat + 0.001, lng: where.lng + 0.0007 };
+    await placeTab(sim, d1TabId, target.lat, target.lng);
+    const movedAt = Date.now();
+    await r1
+      .waitForFunction(
+        (t) => {
+          const fix = JSON.parse(sessionStorage.getItem('goride:rider-trip') ?? 'null')?.driverFix;
+          return fix && Math.abs(fix.lat - t.lat) < 1e-6 && Math.abs(fix.lng - t.lng) < 1e-6;
+        },
+        { timeout: 20_000, polling: 200 },
+        target,
+      )
+      .then(
+        () => check('moving the driver in the simulator moves it on the rider’s map', true, `${Date.now() - movedAt}ms`),
+        () => check('moving the driver in the simulator moves it on the rider’s map', false),
+      );
+    check('rider map shows the driver marker', !!(await r1.$('[data-testid="driver-marker"]')));
+
+    // Reload keeps the driver details (ride_assigned is never replayed).
+    await r1.reload();
+    await r1.waitForSelector('[data-testid="vehicle-plate"]', { timeout: 10_000 });
+    check('R05 survives a reload', (await r1.$eval('[data-testid="vehicle-plate"]', (el) => el.textContent)) === 'SIM1001');
+    await r1.screenshot({ path: `${OUT}/15-rider-driver-moved.png` });
+
+    // Rider cancels from R05; a reason is required.
+    await r1.bringToFront();
+    await (await r1.waitForSelector(buttonXPath('Cancel'))).click();
+    await r1.waitForSelector('[role=dialog]');
+    check('cancel needs a reason first', !(await r1.$(buttonXPath('Cancel ride', '//*[@role="dialog"]'))));
+    await (await r1.waitForSelector('[role=dialog] [role=radio]')).click();
+    await (await r1.waitForSelector(buttonXPath('Cancel ride', '//*[@role="dialog"]'))).click();
+    await r1.waitForSelector('[data-testid="suggested-place"]', { timeout: 10_000 }).then(
+      () => check('rider cancel returns to R01', true),
+      () => check('rider cancel returns to R01', false),
+    );
+    const after = await api('/api/v1/cab/current-trip', { token: riderToken });
+    check('server has no live trip after the cancel', !after.json?.has_active_request && !after.json?.has_ongoing_trip);
+    requestId = null;
   } finally {
-    // Cancel as the rider so driver 1 isn't left on a trip, then take them offline.
-    if (requestId && riderToken) {
+    // Cancel as the rider if the run stopped half way, then take both drivers offline.
+    if (requestId) {
+      const riderToken = await apiLogin('rider', ACCOUNTS.rider1);
       await api(`/api/v1/cab/request-cab/${requestId}/cancel`, { method: 'POST', token: riderToken, body: { reason: 'other', note: 'smoke test cleanup' } });
     }
-    const driverToken = await apiLogin('driver', ACCOUNTS.driver1);
-    await api('/api/v1/driver/online', { method: 'PATCH', body: { is_online: false }, token: driverToken });
+    for (const email of [ACCOUNTS.driver1, ACCOUNTS.driver2]) {
+      const driverToken = await apiLogin('driver', email);
+      await api('/api/v1/driver/online', { method: 'PATCH', body: { is_online: false }, token: driverToken });
+    }
     await d1.goto(`${BASE}/driver`);
   }
 
