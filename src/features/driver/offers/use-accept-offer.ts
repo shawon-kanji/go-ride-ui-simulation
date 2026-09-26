@@ -7,6 +7,7 @@ import { logEvent } from '../../../shared/devlog/devlog-store';
 import { driverTripsClient } from '../api/clients';
 import { driverKeys } from '../api/queries';
 import type { CurrentTripResponse } from '../api/types';
+import { dispatchDriverTrip } from '../trip/trip-store';
 import { useOfferStore } from './offer-store';
 
 // Accept is plain HTTP (first-wins is decided by driver-request-handler under a row
@@ -31,6 +32,13 @@ export function useAcceptOffer() {
       const result = await driverTripsClient.acceptOffer(jobOfferId);
       useOfferStore.getState().setState(jobOfferId, 'accepted');
       logEvent('state', `accepted offer ${jobOfferId.slice(0, 8)} → trip ${result.ongoing_trip.trip_id.slice(0, 8)}`);
+      dispatchDriverTrip({
+        type: 'accepted',
+        trip: result.ongoing_trip,
+        fare: result.trip_request.fare,
+        offer: card.offer,
+        at: Date.now(),
+      });
       queryClient.setQueryData<CurrentTripResponse>(driverKeys.currentTrip(), {
         driver_id: result.ongoing_trip.driver_id,
         has_ongoing_trip: true,

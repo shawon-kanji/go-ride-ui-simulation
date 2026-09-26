@@ -2,6 +2,11 @@ import { apiRequest } from '../../../shared/api/http-client';
 import type { Driver } from '../../../shared/api/types';
 import type {
   AcceptOfferResponse,
+  CancellationReason,
+  CancelTripResponse,
+  DriverTripHistoryResponse,
+  OngoingTripPayload,
+  TripActionResponse,
   CurrentTripResponse,
   DriverStatsResponse,
   EarningsResponse,
@@ -45,6 +50,27 @@ export const driverTripsClient = {
   getCurrentTrip: () => apiRequest<CurrentTripResponse>('/api/v1/driver-trips/current-trip', { auth }),
   acceptOffer: (jobOfferId: string) =>
     apiRequest<AcceptOfferResponse>(`/api/v1/driver-trips/job-offers/${jobOfferId}/accept`, { method: 'POST', auth }),
+  listTrips: (limit = 10) => apiRequest<DriverTripHistoryResponse>('/api/v1/driver-trips/trips', { query: { limit }, auth }),
+  // {id} is ongoing_trip.trip_record_id. The server only allows start → end → collect-payment, in that order.
+  startTrip: (ongoingTripId: string, startPin: string) =>
+    apiRequest<OngoingTripPayload>(`/api/v1/driver-trips/ongoing-trips/${ongoingTripId}/start`, {
+      method: 'POST',
+      body: { start_pin: startPin },
+      auth,
+    }),
+  endTrip: (ongoingTripId: string) =>
+    apiRequest<TripActionResponse>(`/api/v1/driver-trips/ongoing-trips/${ongoingTripId}/end`, { method: 'POST', auth }),
+  collectPayment: (ongoingTripId: string) =>
+    apiRequest<TripActionResponse>(`/api/v1/driver-trips/ongoing-trips/${ongoingTripId}/collect-payment`, {
+      method: 'POST',
+      auth,
+    }),
+  cancelTrip: (ongoingTripId: string, reason: CancellationReason, note?: string) =>
+    apiRequest<CancelTripResponse>(`/api/v1/driver-trips/ongoing-trips/${ongoingTripId}/cancel`, {
+      method: 'POST',
+      body: note ? { reason, note } : { reason },
+      auth,
+    }),
 };
 
 export const locationClient = {

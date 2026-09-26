@@ -94,7 +94,7 @@ export interface OngoingTripPayload {
   request_id: string;
   trip_id: string;
   driver_id: string;
-  status: string;
+  status: OngoingTripStatus;
   pickup_lat: number;
   pickup_lng: number;
   dropoff_lat: number;
@@ -122,6 +122,49 @@ export interface TripRequestPayload {
 export interface AcceptOfferResponse {
   trip_request: TripRequestPayload;
   ongoing_trip: OngoingTripPayload;
+}
+
+/** ongoing_trips.status. `driver_arriving` exists in the schema but nothing sets it. */
+export type OngoingTripStatus = 'assigned' | 'driver_arriving' | 'in_progress' | 'awaiting_payment' | 'completed' | 'cancelled';
+
+/** POST …/end and …/collect-payment. (…/start returns the bare OngoingTripPayload.) */
+export interface TripActionResponse {
+  ongoing_trip: OngoingTripPayload;
+  currency_code?: string;
+}
+
+/** The schema's fixed enum (go-ride-db-schema ValidCancellationReasons); reason is required here. */
+export type CancellationReason = 'rider_absent' | 'rider_requested' | 'vehicle_problem' | 'unsafe_destination' | 'other';
+
+export interface CancelTripResponse {
+  accepted: boolean;
+  ongoing_trip: OngoingTripPayload;
+  request_id: string;
+  stage: 'assigned' | 'in_progress';
+  /** True before pickup: the same request goes back into dispatch. */
+  redispatch_triggered: boolean;
+  cancelled_at: string;
+}
+
+export interface DriverTripHistoryEntry {
+  request_id: string;
+  trip_id: string;
+  rider_id: string;
+  status: 'completed' | 'cancelled';
+  pickup_lat: number;
+  pickup_lng: number;
+  dropoff_lat: number;
+  dropoff_lng: number;
+  assigned_at: string;
+  completed_at?: string;
+  cancelled_at?: string;
+  final_fare?: number;
+  currency_code?: string;
+}
+
+export interface DriverTripHistoryResponse {
+  trips: DriverTripHistoryEntry[];
+  next_cursor?: string;
 }
 
 export interface CurrentTripResponse {

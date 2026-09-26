@@ -6,11 +6,13 @@ import { useLocationStore } from '../../shared/location/location-store';
 import { useRealtimeStore } from '../../shared/realtime/use-realtime';
 import { useDriverSession } from '../../shared/session/session-store';
 import { useActivityStore } from '../../shared/tab/activity';
-import { locationClient } from './api/clients';
+import { driverTripsClient, locationClient } from './api/clients';
 import { useCurrentTripQuery, useDriverProfileQuery } from './api/queries';
 import type { JobOfferMessage, OfferWithdrawnMessage, TripCancelledMessage } from './api/types';
 import { countOpen, useOfferStore } from './offers/offer-store';
 import { createLocationBroadcaster } from './presence/location-broadcaster';
+import { isActiveDriverPhase, type DriverTripPhase } from './trip/trip-model';
+import { dispatchDriverTrip, useDriverTripStore } from './trip/trip-store';
 
 // Everything a signed-in driver tab runs regardless of which screen is open — the
 // mobile app mounts the same things in its authenticated layout, never in a screen,
@@ -65,6 +67,7 @@ function useOfferFeed(): void {
           break;
         case 'trip_cancelled':
           store.withdrawRequest((message as unknown as TripCancelledMessage).request_id);
+          dispatchDriverTrip({ type: 'rider-cancelled', message: message as unknown as TripCancelledMessage, at: Date.now() });
           break;
       }
     });
@@ -99,33 +102,80 @@ function useOpenOffersOnArrival(): void {
   }, [openCount, pathname, navigate]);
 }
 
-function useSimulatorActivity(isOnline: boolean | undefined, isPaused: boolean | undefined, onTrip: boolean): void {
+const TRIP_ACTIVITY: Partial<Record<DriverTripPhase, string>> = {
+  to_pickup: 'to pickup',
+  on_trip: 'on trip',
+  collecting: 'collecting cash',
+};
+
+function useSimulatorActivity(isOnline: boolean | undefined, isPaused: boolean | undefined, tripPhase: DriverTripPhase | null): void {
   const openCount = useOfferStore((s) => countOpen(Object.values(s.offers)));
   const setActivity = useActivityStore((s) => s.setActivity);
 
   useEffect(() => {
     if (isOnline === undefined) setActivity(null);
-    else if (onTrip) setActivity('on trip');
+    else if (tripPhase && TRIP_ACTIVITY[tripPhase]) setActivity(TRIP_ACTIVITY[tripPhase]!);
     else if (!isOnline) setActivity('offline');
     else if (isPaused) setActivity('paused');
     else if (openCount > 0) setActivity(`${openCount} ${openCount === 1 ? 'offer' : 'offers'}`);
     else setActivity('online');
-  }, [isOnline, isPaused, onTrip, openCount, setActivity]);
+  }, [isOnline, isPaused, tripPhase, openCount, setActivity]);
 
   useEffect(() => () => setActivity(null), [setActivity]);
+}
+
+/**
+ * current-trip → trip store, on load and after every reconnect (the server doesn't
+ * replay trip events). A live local trip the server no longer has ended while we
+ * weren't looking; its outcome comes from /driver-trips/trips.
+ */
+function useTripSync(): void {
+  const { data: current, refetch } = useCurrentTripQuery();
+  const wsState = useRealtimeStore((s) => s.wsState);
+
+  useEffect(() => {
+    if (wsState === 'open') void refetch();
+  }, [wsState, refetch]);
+
+  useEffect(() => {
+    if (!current) return;
+    dispatchDriverTrip({ type: 'snapshot', current, at: Date.now() });
+    const trip = useDriverTripStore.getState().trip;
+    if (!current.has_ongoing_trip && trip && isActiveDriverPhase(trip.phase)) {
+      void driverTripsClient
+        .listTrips(10)
+        .then((history) => {
+          const entry = history.trips.find((t) => t.request_id === trip.requestId) ?? null;
+          logEvent('state', `trip ${trip.requestId.slice(0, 8)} ended off-screen: ${entry?.status ?? 'not in history'}`);
+          dispatchDriverTrip({ type: 'outcome', requestId: trip.requestId, entry, at: Date.now() });
+        })
+        .catch((error) => logEvent('error', 'trip history lookup failed', String(error)));
+    }
+  }, [current]);
+}
+
+/** A live trip owns the home screen: /driver and /driver/offers go to D09. The menu stays reachable. */
+function useFollowTrip(active: boolean): void {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    if (active && (pathname === '/driver' || pathname === '/driver/offers')) navigate('/driver/trip', { replace: true });
+  }, [active, pathname, navigate]);
 }
 
 export function useDriverRuntime(): void {
   const { data: profile } = useDriverProfileQuery();
   const isOnline = profile?.driver.is_online;
   const isPaused = profile?.driver.is_paused;
-  const { data: currentTrip } = useCurrentTripQuery();
-  const onTrip = currentTrip?.has_ongoing_trip === true;
+  const tripPhase = useDriverTripStore((s) => s.trip?.phase ?? null);
+  const onTrip = isActiveDriverPhase(tripPhase ?? undefined);
 
   useLocationBroadcastLifecycle(isOnline);
   useOfferFeed();
   useOpenOffersOnArrival();
-  useSimulatorActivity(isOnline, isPaused, onTrip);
+  useTripSync();
+  useFollowTrip(onTrip);
+  useSimulatorActivity(isOnline, isPaused, onTrip ? tripPhase : null);
 
   // Offers belong to an online session; going offline or signing out drops them.
   useEffect(() => {
