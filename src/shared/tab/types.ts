@@ -2,6 +2,17 @@ import type { GeoPoint, LocationSource } from '../location/location-store';
 
 export type Role = 'rider' | 'driver';
 
+/** A rider's live trip as the simulator draws it: pins plus the assigned driver. */
+export interface TripMarker {
+  phase: string;
+  pickup: GeoPoint;
+  dropoff: GeoPoint;
+  /** Assigned driver's user id — the simulator links it to that driver's tab. */
+  driverId: string | null;
+  /** Last position the rider was told about (driver_location). */
+  driverFix: GeoPoint | null;
+}
+
 export type WsState = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed';
 
 /** What each rider/driver tab tells the simulator about itself. */
@@ -17,6 +28,7 @@ export interface TabPresence {
   locationSource: LocationSource;
   /** Short status for the simulator, e.g. "online", "paused", "2 offers". */
   activity: string | null;
+  trip?: TripMarker | null;
   sentAt: number;
 }
 

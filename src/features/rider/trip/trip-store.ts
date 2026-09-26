@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import { logEvent } from '../../../shared/devlog/devlog-store';
 import { tabStorage } from '../../../shared/lib/storage';
+import { sessionStores } from '../../../shared/session/session-store';
 import { reduceTrip, type RiderTrip, type TripEvent } from './trip-model';
 
 // The rider tab's trip, kept in sessionStorage: ride_assigned is pushed once and never
@@ -31,3 +32,9 @@ export const useTripStore = create<TripStoreState>((set, get) => ({
 }));
 
 export const dispatchTrip = (event: TripEvent) => useTripStore.getState().dispatch(event);
+
+// A tab's trip belongs to whoever is signed in: signing out (or the token expiring)
+// forgets it, so the next rider in this tab doesn't inherit it.
+sessionStores.rider.subscribe((state, prev) => {
+  if (prev.token && !state.token) useTripStore.getState().dispatch({ type: 'clear' });
+});

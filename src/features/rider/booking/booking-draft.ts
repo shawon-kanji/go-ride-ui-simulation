@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 import { tabStorage } from '../../../shared/lib/storage';
+import { sessionStores } from '../../../shared/session/session-store';
 import type { TripPlace } from '../trip/trip-model';
 
 // What the rider has picked so far in R01 → R02 → R03. Kept per tab so a reload in
@@ -44,4 +45,8 @@ export const useBookingDraft = create<BookingDraftState>((set, get) => {
       tabStorage.remove(STORAGE_KEY);
     },
   };
+});
+
+sessionStores.rider.subscribe((state, prev) => {
+  if (prev.token && !state.token) useBookingDraft.getState().reset();
 });
