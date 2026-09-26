@@ -1,5 +1,5 @@
 import { useTodayEarningsQuery, useTodayOnlineTimeQuery } from '../api/queries';
-import { formatMinutes, formatMoney } from '../format';
+import { formatMinutes, formatMoney } from '../../../shared/lib/format';
 
 // Web port of go-ride-driver-app's StatCards (D06 bottom sheet).
 

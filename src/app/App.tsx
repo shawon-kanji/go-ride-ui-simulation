@@ -9,11 +9,16 @@ import { MenuScreen as DriverMenuScreen } from '../features/driver/screens/MenuS
 import { OffersScreen } from '../features/driver/screens/OffersScreen';
 import { TripAssignedScreen } from '../features/driver/screens/TripAssignedScreen';
 import { SignupScreen } from '../features/auth/SignupScreen';
+import { RiderLayout } from '../features/rider/RiderLayout';
+import { ConfirmPickupScreen } from '../features/rider/screens/ConfirmPickupScreen';
+import { FindingDriverScreen } from '../features/rider/screens/FindingDriverScreen';
+import { PickRideScreen } from '../features/rider/screens/PickRideScreen';
+import { TripScreen } from '../features/rider/screens/TripScreen';
+import { WhereToScreen } from '../features/rider/screens/WhereToScreen';
 import type { Role } from '../shared/tab/types';
 import { HealthPage } from './health/HealthPage';
 import { HomePage } from './home/HomePage';
 import { RedirectIfSession, RequireSession, RoleShell } from './RoleShell';
-import { SignedInPlaceholder } from './SignedInPlaceholder';
 import { SimulatorPage } from './simulator/SimulatorPage';
 
 const queryClient = new QueryClient({
@@ -23,7 +28,18 @@ const queryClient = new QueryClient({
 });
 
 const signedInScreens: Record<Role, RouteObject[]> = {
-  rider: [{ index: true, element: <SignedInPlaceholder role="rider" /> }],
+  rider: [
+    {
+      element: <RiderLayout />,
+      children: [
+        { index: true, element: <WhereToScreen /> },
+        { path: 'pickup', element: <ConfirmPickupScreen /> },
+        { path: 'ride', element: <PickRideScreen /> },
+        { path: 'finding', element: <FindingDriverScreen /> },
+        { path: 'trip', element: <TripScreen /> },
+      ],
+    },
+  ],
   driver: [
     {
       element: <DriverLayout />,

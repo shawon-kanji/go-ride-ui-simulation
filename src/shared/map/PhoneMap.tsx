@@ -3,13 +3,12 @@ import { Car, Crosshair, User } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
 import type { GeoPoint } from '../location/location-store';
+import { KL_CENTER } from './constants';
 
 // Full-bleed map for the phone screens. Follows the tab's own position until the user
 // pans away; the re-centre button resumes following. Marker content is styled inline:
 // Google's unlayered map CSS overrides Tailwind 4's layered utilities.
 
-// Kuala Lumpur city centre — go-ride-driver-app's HomeMap fallback.
-const FALLBACK: GeoPoint = { lat: 3.139, lng: 101.6869 };
 const MAP_ID = 'DEMO_MAP_ID';
 
 const SELF_STYLE = {
@@ -35,7 +34,7 @@ interface PhoneMapProps {
 
 export function PhoneMap({ position, self, bottomInset = 0, children }: PhoneMapProps) {
   const [following, setFollowing] = useState(true);
-  const [initialCenter] = useState(() => position ?? FALLBACK);
+  const [initialCenter] = useState(() => position ?? KL_CENTER);
   const style = SELF_STYLE[self];
   const Icon = style.Icon;
 

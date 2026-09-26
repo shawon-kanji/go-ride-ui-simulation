@@ -1,3 +1,5 @@
+import { haversineMeters } from './geo';
+
 // Currency display: the handoff shows Malaysian ringgit as "RM 72.00". Unknown codes
 // are shown as-is; a missing code falls back to RM like the driver app.
 const CURRENCY_SYMBOLS: Record<string, string> = { MYR: 'RM', RM: 'RM' };
@@ -21,4 +23,19 @@ export function formatMinutes(total: number): string {
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+/** Compact form for buttons, as in the handoff's "Book Standard · RM72.00". */
+export function formatMoneyTight(amount: number, currencyCode?: string): string {
+  return formatMoney(amount, currencyCode).replace(/^RM /, 'RM');
+}
+
+/** Distance between two points in km, straight line. */
+export function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  return haversineMeters({ latitude: a.lat, longitude: a.lng }, { latitude: b.lat, longitude: b.lng }) / 1000;
+}
+
+/** "0.04 km" under 10 km (the handoff's place rows), whole km beyond. */
+export function formatPlaceDistance(km: number): string {
+  return km < 10 ? `${km.toFixed(2)} km` : `${km.toFixed(1)} km`;
 }

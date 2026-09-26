@@ -5,7 +5,7 @@ import { Card } from '../../../shared/ui/Card';
 import { Button } from '../../../shared/ui/Button';
 import { usePlaceLabel } from '../../../shared/places/places';
 import { useCurrentTripQuery } from '../api/queries';
-import { formatMoney } from '../format';
+import { formatMoney } from '../../../shared/lib/format';
 
 // Temporary until Phase 4 builds D09 (trip + cash collection) and D10 (cancel).
 // Shows what driver-request-handler returned for the accepted offer.

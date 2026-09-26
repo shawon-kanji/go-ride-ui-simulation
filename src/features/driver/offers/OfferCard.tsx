@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRealtimeStore } from '../../../shared/realtime/use-realtime';
 import { Button } from '../../../shared/ui/Button';
 import { usePlaceLabel } from '../../../shared/places/places';
-import { formatKm, formatMinutesShort, formatMoney } from '../format';
+import { formatKm, formatMinutesShort, formatMoney } from '../../../shared/lib/format';
 import { type OfferCard as OfferCardModel, useOfferStore } from './offer-store';
 
 // One D08 offer: fare at 24px, trip distance/duration, pickup → drop-off stem with
