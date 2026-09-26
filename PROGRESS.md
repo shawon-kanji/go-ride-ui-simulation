@@ -4,7 +4,7 @@ The working log for this repo. [PLAN.md](PLAN.md) is the design; this file track
 what's next at task level, and what was learned along the way. Update it at the end of
 every working session and every phase.
 
-**Last updated:** 2026-09-26 · **Current phase:** 5 (not started)
+**Last updated:** 2026-09-26 · **Current phase:** 5 (research + design done, build not started)
 
 ---
 
@@ -17,7 +17,8 @@ every working session and every phase.
 | 2 Driver → receiving offers | ✅ done 2026-09-25 | `05a60d8`…`2b74e76` | Unit tests (77), `smoke:firefox` 26/26 (offer in ~150–250ms) |
 | 3 Rider booking happy path | ✅ done 2026-09-26 | `94d6ca1`…`d63c85e` | Unit tests (100), `smoke:firefox` 40/40 (offers to 2 drivers in ~80–110ms, driver move → rider map in <5s) |
 | 4 Trip completion + cancellation | ✅ done 2026-09-26 | `356510e`…`b38e57c` | Unit tests (122), `smoke:firefox` 58/58 (full lifecycle, redispatch, rider cancel mid-trip) |
-| 5 Simulator power features | ⏳ next | — | — |
+| 5 Realistic driving (route playback) | ⏳ next | — | — |
+| 5b Simulator tools (setup, layouts, timeline, inspector) | ☐ | — | — |
 | 6 Remaining screens | ☐ | — | — |
 
 ### Phase 0 — Foundation ✅
@@ -258,38 +259,146 @@ mid-trip); the rider's `trip_already_rated` path.
 
 ---
 
-## Next: Phase 5 — Simulator power features
+## Next: Phase 5 — Realistic driving (simulator route playback)
 
-**Done when** (PLAN.md): one click drives the assigned driver to the pickup and the rider's ETA counts down; then on
-to the drop-off.
+**Goal:** the simulator drives a driver tab like a real car. The car follows real roads at road-appropriate speeds,
+with no straight-line hops and no teleport to the destination. The driver app and the rider app both show **the same
+route**.
 
-Draft task list. **Start with research (5.0)**, as Phase 4 did; the tasks may change after it.
+**Done when:**
+1. One click, or auto-drive, moves the assigned driver along real roads to the pickup. Every location ping the
+   backend stores lies on that route.
+2. D09 and R05 draw the identical route. The rider's car glides along it between pings, and both apps' ETAs count
+   down together.
+3. After the start with the PIN, the same happens to the drop-off along the booked route (R03's and R06's route).
+4. The playback controls work: speed, pause, stop.
 
-### 5.0 Research
-- [ ] How the browser key can get a driving path: Directions/Routes from the browser (the key allows both), or reuse
-      the booked quote's `route_polyline` for pickup → drop-off
-- [ ] Location throttle vs playback: the broadcaster sends movement at most every 10s, so the rider's R05 ETA steps
-      every ~10s. Is that realistic enough, or should playback speed scale?
-- [ ] Bus protocol additions (`play-route` / `stop-route`, progress back to the simulator) — PLAN §6 has a sketch
+Quick setup, saved layouts, the event timeline and the trip inspector (the rest of PLAN §6) move to **Phase 5b**,
+after this.
 
-### 5.1 Route playback
-- [ ] Simulator: for a driver on a trip, **Drive to pickup** / **Drive to drop-off** buttons; speed (e.g. 30/60/120 km/h,
-      ×1–×10); pause/stop; progress on the map
-- [ ] Freehand path: click waypoints, then play
-- [ ] Playback runs in the simulator and streams `set-location` ticks; the driver tab still does the API calls
-- [ ] D09's Navigate button starts "drive to pickup/drop-off" for that tab
+### 5.0 Research ✅ (2026-09-26)
+**Where routes come from today:**
+- **Pickup → drop-off:** cab-request-handler calls the legacy **Directions API** (server key) once at fare-estimate
+  and stores `overview_polyline` in `trip_fares.route_polyline`. The rider has it (quote, `current-trip.fare`); the
+  driver never gets it (`driver-request-handler`'s fare payload has only id/currency/total).
+- **Driver → pickup (approach):** no route exists anywhere in the backend.
+- **Rider ETA before pickup:** websocket-gateway sends `eta_minutes = straight-line km / 30 km/h`
+  (`tracking/notifier.go`, `FALLBACK_AVG_SPEED_KPH`). Real roads are very different: a spot ~400 m away was **3.3 km /
+  5 min** by road (one-way streets).
+- **After the start:** no `driver_location` at all (Phase 4 finding).
 
-### 5.2 Quick setup + layouts
-- [ ] "Open N driver tabs", scatter online drivers around a point
-- [ ] Save/load named layouts (positions per user email) in `localStorage`
+**Browser routing works:** the browser key allows `routes.googleapis.com`, and the project has the Routes API enabled.
+Checked with `computeRoutes`, `TRAFFIC_UNAWARE`: legs → steps with `distanceMeters`, `staticDuration` and a road path.
+Step speeds varied from 21 km/h (side streets) to 64 km/h (highway), which is enough for a realistic speed profile.
+The Maps JS equivalent is `google.maps.routes.Route.computeRoutes` (the `routes` library, via vis.gl
+`useMapsLibrary('routes')`, `fields: ['path', 'legs', 'distanceMeters', 'staticDurationMillis']`).
 
-### 5.3 Event timeline + trip inspector
-- [ ] Merged, filterable timeline from every tab's dev log (bus `log` messages exist already); colour by tab; JSON detail
-- [ ] Trip inspector: pick a request, show its states with timestamps, who was offered, who won
+**Driver ping cadence** (location broadcaster, ported rules): movement ping at most every 10s and only after ≥25 m;
+heartbeat 60s. So the backend, and therefore the rider, sees the car every ~10s. That's realistic; the rider app should
+animate between pings rather than jump.
+
+**Background tabs:** browsers throttle timers in hidden tabs to 1/s, and Chrome's intensive throttling drops chained
+timers to 1/min after 5 min hidden. The simulator is often hidden while you watch a phone tab, so playback must
+**derive the position from the wall clock** (a late tick jumps *along the road*, never off it), and tick from a
+**dedicated Worker**, whose timers aren't throttled the same way. The driver tab's broadcaster is event-driven (bus
+message → location store → ping), so it's unaffected.
+
+### Design
+**Route per leg, computed once, by the simulator** (the fake GPS is also the car's sat-nav):
+
+| Leg | Path | Speeds |
+|---|---|---|
+| To pickup | `computeRoutes(driver position → pickup)` from the browser | Per step (`distanceMeters / staticDuration`) |
+| To drop-off | The **booked** `route_polyline` (exactly what R03/R06 showed the rider) | Route average (booked duration ÷ distance) |
+
+Fallbacks: no booked polyline → `computeRoutes(pickup → drop-off)`; Routes API failure → an error in the simulator,
+never a straight line.
+
+**Movement profile** (pure module, unit-tested):
+- Densify the path to ≤10 m segments; each segment's target speed comes from its step.
+- Slow for corners: a turn angle >60° caps the speed at ~15 km/h, >30° at ~25 km/h, applied over the ~30 m before it.
+- Acceleration ≤1.5 m/s², braking ≤2.5 m/s²; start and end at 0.
+- The result is a timeline: `positionAt(t) → {lat, lng, heading, metresDone, speed}`. At ×1 its total time is close to
+  Google's `staticDuration`.
+
+**Playback** (simulator):
+- Wall-clock based, `simTime = (now − anchor) × speedFactor`.
+- The Worker ticks at ~4 Hz and posts the existing `set-location {tabId, lat, lng}` (plus an optional `heading`).
+  The driver tab does all backend calls itself, as today.
+- Speed ×1 / ×2 / ×5 / ×10; pause, resume, stop.
+- Stops at the destination, if the tab is moved by hand (click/drag), or when the tab goes stale.
+
+**Same route in both apps: over the bus, not the backend.** The backend has no route for the approach leg and none
+for the driver, and we don't change the backend. So the simulator publishes:
+
+```
+nav-route  { requestId, leg: 'pickup'|'dropoff', path (encoded polyline), steps[{metres, seconds}],
+             anchor: {atMs, metres}, speedFactor, paused }
+nav-route-clear { requestId, leg }
+```
+
+- The driver and rider tabs take it only when `requestId` matches their trip, store it per trip + leg in
+  `sessionStorage`, and it's re-sent on `whois` so a reloaded tab gets it back.
+- It's dev-only data like the fake GPS itself. The production fix is a backend change (route in `ride_assigned` /
+  driver `current-trip`), recorded under Known issues.
+- The rider's **position** still comes only from the backend (`driver_location`). The shared route is geometry plus
+  timing, never a live position. The one exception is R06, where the backend sends nothing, so the rider estimates the
+  car's position along the route from the anchor and speed factor.
+
+**What each app shows:**
+- **D09:** travelled part grey, remaining part indigo (as in the design), from the car snapped onto the route. The ETA
+  pill is the remaining profile time, not straight-line. The car icon rotates with the heading.
+- **R05:**
+  - the approach route, remaining part from the latest `driver_location` snapped to the route
+  - the car **glides** between pings along the route, tweened over the ping gap (~10s) instead of hopping
+  - ETA and km come from the remaining route and step durations; the gateway's straight-line numbers are only a
+    fallback when there's no route
+- **R06:** the booked route with an estimated car moving along it (the anchor and speed factor keep it in step with
+  the real playback).
+- **Simulator:** the route on its map, a per-driver playback card (leg, progress, speed, pause/stop), and the car
+  following it.
+
+**Auto-drive:**
+- A simulator toggle: when a driver accepts, drive to the pickup; when the trip starts, drive to the drop-off.
+- D09's **Navigate** button sends `drive-request` on the bus. If no simulator is open, it says "Open the simulator
+  to drive".
+- The simulator only moves GPS. The PIN, End trip and Cash collected stay manual in the driver tab (no impersonation).
+
+**Presence additions:** the driver tab announces its trip (requestId, phase, pickup, drop-off). The rider's trip marker
+gains `requestId` and the booked `routePolyline`, so the simulator can build leg 2.
+
+### 5.1 Route engine (pure, `features/simulator/drive/`)
+- [ ] Polyline decode/encode (own, tested against Google's sample string), densify, haversine, bearing, turn angles
+- [ ] Movement profile + `positionAt(t)`; snap-to-route (nearest point, metres along); remaining metres/time
+- [ ] Unit tests: stays on the path at every t, monotonic progress, ends exactly at the destination with speed 0,
+      corner slowdown, acceleration limits, total time vs step durations (±15%), snapping
+
+### 5.2 Route sources + playback controller (simulator)
+- [ ] `computeRoutes` for leg 1 (and the leg 2 fallback); leg 2 from the rider's booked polyline via presence
+- [ ] Worker ticker, wall-clock controller, speed/pause/stop, stop on manual move or stale tab; `heading` on
+      `set-location` (optional field; the location store keeps it)
+- [ ] Presence additions (driver trip; rider `requestId` + `routePolyline`); `nav-route` / `nav-route-clear` / re-send on `whois`
+- [ ] Simulator UI: route on the map, playback card per driver on a trip, auto-drive toggle, `drive-request` handling
+
+### 5.3 Apps show the shared route
+- [ ] Shared nav-route store (per trip + leg, `sessionStorage`) in both apps
+- [ ] D09: travelled/remaining route, route-based ETA, rotating car; Navigate → `drive-request`
+- [ ] R05: route, car tween between pings along the route, route-based ETA/km (gateway values as fallback)
+- [ ] R06: estimated car on the booked route from the anchor and speed factor
 
 ### 5.4 Tests
-- [ ] Unit: path interpolation at a given speed, playback controller
-- [ ] Smoke: one click drives driver to pickup; rider's R05 ETA decreases; driver arrives (distance < 60 m → "Arriving now")
+- [ ] Smoke: auto-drive on; book; driver accepts → the car drives itself to the pickup:
+  - every new `driver_locations` row for the trip lies ≤25 m from the route
+  - D09 and R05 hold the same encoded path
+  - the rider's ETA is non-increasing and reaches "Arriving now"
+  - start with PIN → it drives to the drop-off along the booked polyline
+  - end + collect as before
+- [ ] Smoke: pause holds the position; ×10 finishes proportionally faster; a manual move stops playback and clears the route
+- [ ] Commit per sub-area, push, update this file
+
+### Phase 5b (after 5) — the rest of PLAN §6
+Quick setup (open N driver tabs, scatter online drivers), saved layouts, merged event timeline with filters, trip
+inspector.
 
 ## Decisions log
 
@@ -318,6 +427,10 @@ Draft task list. **Start with research (5.0)**, as Phase 4 did; the tasks may ch
 | 2026-09-26 | Driver "heading to pickup + PIN", rider "pay your driver", "trip complete + rating", "finding you another" designed in-app | Not in the handoff |
 | 2026-09-26 | R06 progress is estimated from the booked route + `started_at` | Gateway stops `driver_location` at trip start |
 | 2026-09-26 | Driver tab keeps the rider's name with its trip in `sessionStorage` | Only `job_offer.rider_name` carries it |
+| 2026-09-26 | Phase 5 = realistic driving; setup/layouts/timeline/inspector → Phase 5b | User priority: real-road driving, same route in both apps |
+| 2026-09-26 | Route computed once per leg by the simulator (Routes API for the approach, booked polyline for the trip) | Backend has no approach route and gives none to the driver |
+| 2026-09-26 | Route shared to both apps over the bus; rider position still only from `driver_location` | No backend changes; the shared route is geometry + timing, not a live position |
+| 2026-09-26 | Playback position from wall clock, ticks from a Worker | Hidden tabs throttle timers (1/s, or 1/min after 5 min in Chrome) |
 | 2026-09-26 | Simulator place search calls Google Places (New) from the browser key | Simulator has no login, so no backend places proxy; user chose adding Places to the key over borrowing a tab's token |
 
 ## Gotchas learned
@@ -386,10 +499,14 @@ Draft task list. **Start with research (5.0)**, as Phase 4 did; the tasks may ch
 - **No driver position after pickup:** websocket-gateway stops `driver_location` at `trip_started`, so R06 shows
   estimated progress (route duration from `started_at`) rather than a live car. A backend change (keep the stream
   until `trip_ended`, retargeted to the drop-off) would fix it; not planned.
+- **Rider ETA before pickup is straight-line ÷ 30 km/h** (websocket-gateway `tracking/notifier.go`) and ignores roads;
+  Phase 5 computes it on the rider side from the shared route instead.
+- **No route reaches the driver, and none exists for the approach leg**; Phase 5 shares the simulator's route over
+  the bus (dev-only). Backend follow-up if wanted: include a route polyline in `ride_assigned` and the driver's
+  `current-trip`.
 - ~~Currency~~ — resolved 2026-09-26 (MYR via KUL fare configs).
 - Rider cancel reasons map to the enum (`rider_requested`/`other`) with the wording in `note`; the backend has no
   rider-specific reasons.
 - Simulator actor labels overlap when a rider and driver stand close together.
 - D04/D05 screens (verification, vehicles) and D09–D11 not built yet (Phases 4 and 6).
-- Car movement along a route (asked for 2026-09-25) stays in Phase 5 as planned; until then move
-  drivers by clicking/dragging in the simulator.
+- Car movement along a route (asked 2026-09-25, specified 2026-09-26: real roads, same route in both apps) is Phase 5.

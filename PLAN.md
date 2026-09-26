@@ -249,7 +249,8 @@ A tab missing three heartbeats is shown as stale; `bye` is sent on `pagehide`.
    online, offered, on trip). Pickup and drop-off pins for active trips.
 2. **Place actors** — select a tab in the list, then click the map to move it; markers are
    draggable.
-3. **Route playback** — drive a selected driver along a path at a chosen speed:
+3. **Route playback** (Phase 5; design in PROGRESS.md) — drive a selected driver along a real road route at a
+   chosen speed, with the same route shown in the driver and rider apps:
    - *To pickup* / *to drop-off* for a driver on a trip (path from the Directions API, or a
      straight-line fallback);
    - a freehand path drawn by clicking waypoints.
@@ -332,10 +333,19 @@ Each phase ends with something you can run and click through.
 - The full task list, backend state machine and error codes are in PROGRESS.md.
 - **Done when:** the full lifecycle and both cancel paths work end to end.
 
-### Phase 5 — Simulator power features (next)
-- Route playback (to pickup/drop-off, drawn paths, speed), quick setup, saved layouts.
-- Merged event timeline with filters; trip inspector.
-- **Done when:** one click drives the assigned driver to pickup and the rider's ETA counts down.
+### Phase 5 — Realistic driving (next; research + design done 2026-09-26)
+- The simulator drives a driver tab along **real roads**: Routes API `computeRoutes` for the approach, the **booked**
+  route polyline for the trip. It moves at per-step road speeds with corner slowdowns and smooth acceleration, so
+  there are no straight-line hops.
+- **The same route in both apps:** the simulator publishes each leg's route on the bus. D09 and R05/R06 draw it, the
+  rider's car glides between the ~10s pings, and both ETAs come from the route rather than a straight line.
+- Speed ×1–×10, pause, stop, auto-drive on accept and on start, and D09's Navigate button.
+- Details and tasks: PROGRESS.md.
+- **Done when:** one click drives the assigned driver to the pickup with every ping on the route, both apps show the
+  same route and a falling ETA, then the same to the drop-off.
+
+### Phase 5b — Simulator tools
+- Quick setup, saved layouts, merged event timeline with filters, trip inspector (PLAN §6 items 4–6).
 
 ### Phase 6 — Remaining screens
 - R07 rider profile (edit, change password); D11 profile & earnings (`/earnings`, `/stats`,
