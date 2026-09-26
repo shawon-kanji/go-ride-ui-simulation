@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import type { GeoPoint } from '../../shared/location/location-store';
 import { ActorMarker } from './ActorMarker';
 import { readMapView, saveMapView } from './map-view';
+import { TripOverlay } from './TripOverlay';
 import { actorLabel, type RegisteredTab } from './tab-registry';
 
 // The simulator's map. Clicking the map moves the selected tab; markers can also be
@@ -65,6 +66,7 @@ export function SimulatorMap({ tabs, selected, focus, isStale, onSelect, onMove 
             />
           ) : null,
         )}
+        <TripOverlay tabs={tabs} />
         <FocusController focus={focus} />
       </Map>
 
