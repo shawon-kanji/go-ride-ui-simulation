@@ -7,8 +7,8 @@ import { distanceKm, formatMoney } from '../../../shared/lib/format';
 import { Button } from '../../../shared/ui/Button';
 import { useBookingDraft } from '../booking/booking-draft';
 import { CancelTripSheet } from '../components/CancelTripSheet';
-import { PIN_COLORS } from '../components/map-colors';
-import { CarMarker, FitBounds, PlaceDot, RiderMap } from '../components/map-pieces';
+import { PIN_COLORS } from '../../../shared/map/map-colors';
+import { CarMarker, FitBounds, PlaceDot, AppMap } from '../../../shared/map/map-pieces';
 import type { RiderTrip } from '../trip/trip-model';
 import { dispatchTrip, useTripStore } from '../trip/trip-store';
 
@@ -137,7 +137,7 @@ function DriverOnTheWay({ trip }: { trip: RiderTrip }) {
   return (
     <div className="relative flex-1 overflow-hidden bg-r-map-land">
       <div className="absolute inset-x-0 top-0" style={{ bottom: SHEET_HEIGHT - 24 }}>
-        <RiderMap defaultCenter={trip.pickup} defaultZoom={15}>
+        <AppMap defaultCenter={trip.pickup} defaultZoom={15}>
           <PlaceDot position={trip.pickup} kind="dropoff" />
           {trip.driverFix && (
             <>
@@ -146,7 +146,7 @@ function DriverOnTheWay({ trip }: { trip: RiderTrip }) {
             </>
           )}
           <FitBounds points={mapPoints} padding={{ top: 90, bottom: 60, left: 60, right: 60 }} singleZoom={15} />
-        </RiderMap>
+        </AppMap>
       </div>
 
       <div className="absolute top-4 left-4 flex items-center gap-2 rounded-pill bg-white px-4 py-2.5 text-[14px] font-bold text-r-ink shadow-float">

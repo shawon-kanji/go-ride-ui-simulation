@@ -2,19 +2,19 @@ import { AdvancedMarker, Map, useMap, type MapProps } from '@vis.gl/react-google
 import { Car } from 'lucide-react';
 import { useEffect, type ReactNode } from 'react';
 
-import type { GeoPoint } from '../../../shared/location/location-store';
+import type { GeoPoint } from '../location/location-store';
 import { PIN_COLORS } from './map-colors';
 
-// Map building blocks for the rider screens. Marker content is styled inline: Google's
+// Map building blocks for the phone screens (rider and driver). Marker content is styled inline: Google's
 // unlayered map CSS beats Tailwind 4's layered utilities inside the map.
 
 const MAP_ID = 'DEMO_MAP_ID';
 
 
-type RiderMapProps = Omit<MapProps, 'mapId'> & { children?: ReactNode };
+type AppMapProps = Omit<MapProps, 'mapId'> & { children?: ReactNode };
 
-/** Full-bleed map without Google's controls, as every rider screen uses it. */
-export function RiderMap({ children, ...props }: RiderMapProps) {
+/** Full-bleed map without Google's controls, as the phone screens use it. */
+export function AppMap({ children, ...props }: AppMapProps) {
   return (
     <Map
       mapId={MAP_ID}
@@ -48,7 +48,7 @@ export function PlaceDot({ position, kind }: { position: GeoPoint; kind: 'pickup
 }
 
 /** The assigned driver: a dark rounded car badge (the handoff's black marker). */
-export function CarMarker({ position }: { position: GeoPoint }) {
+export function CarMarker({ position, color = PIN_COLORS.car }: { position: GeoPoint; color?: string }) {
   return (
     <AdvancedMarker position={position} anchorLeft="-50%" anchorTop="-50%" zIndex={30}>
       <div
@@ -57,7 +57,7 @@ export function CarMarker({ position }: { position: GeoPoint }) {
           width: 34,
           height: 26,
           borderRadius: 8,
-          background: PIN_COLORS.car,
+          background: color,
           color: '#fff',
           display: 'flex',
           alignItems: 'center',

@@ -10,8 +10,8 @@ import { useFareEstimateQuery, useRequestCabMutation } from '../api/queries';
 import type { FareQuote, ServiceType } from '../api/types';
 import { useBookingDraft } from '../booking/booking-draft';
 import { formatCountdown, quoteSecondsLeft, sortQuotes, TIERS } from '../booking/quotes';
-import { PIN_COLORS } from '../components/map-colors';
-import { FitBounds, PlaceDot, RiderMap } from '../components/map-pieces';
+import { PIN_COLORS } from '../../../shared/map/map-colors';
+import { FitBounds, PlaceDot, AppMap } from '../../../shared/map/map-pieces';
 
 // R03 Pick a ride: every tier from one POST /cab/fare-estimate (the backend locks each
 // quote for 15 minutes), the route on the map, the chosen tier's fare breakdown, and
@@ -124,7 +124,7 @@ export function PickRideScreen() {
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden bg-white">
       <div className="relative shrink-0" style={{ height: MAP_HEIGHT + 24 }}>
-        <RiderMap defaultCenter={pickup} defaultZoom={13}>
+        <AppMap defaultCenter={pickup} defaultZoom={13}>
           <PlaceDot position={pickup} kind="pickup" />
           <PlaceDot position={dropoff} kind="dropoff" />
           {polyline ? (
@@ -133,7 +133,7 @@ export function PickRideScreen() {
             <Polyline path={[pickup, dropoff]} strokeColor={PIN_COLORS.route} strokeWeight={4} strokeOpacity={0.6} geodesic />
           )}
           <FitBounds points={[pickup, dropoff]} padding={{ top: 70, bottom: 50, left: 70, right: 170 }} />
-        </RiderMap>
+        </AppMap>
 
         <button
           type="button"

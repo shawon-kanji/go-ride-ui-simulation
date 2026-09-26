@@ -324,7 +324,7 @@ try {
 
     await d1.bringToFront();
     await (await d1.waitForSelector(buttonXPath('Accept', '//article[@data-testid="offer-card"]'))).click();
-    await waitForText(d1, 'Trip assigned').then(
+    await d1.waitForSelector('[data-testid="start-pin-input"]', { timeout: 10_000 }).then(
       () => check('accepting wins the trip', true),
       () => check('accepting wins the trip', false),
     );

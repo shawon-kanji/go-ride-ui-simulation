@@ -7,7 +7,7 @@ import { Button } from '../../../shared/ui/Button';
 import type { SearchStatus } from '../api/types';
 import { useBookingDraft } from '../booking/booking-draft';
 import { CancelTripSheet } from '../components/CancelTripSheet';
-import { RiderMap, SearchPulse } from '../components/map-pieces';
+import { AppMap, SearchPulse } from '../../../shared/map/map-pieces';
 import type { RiderTrip } from '../trip/trip-model';
 import { dispatchTrip, useTripStore } from '../trip/trip-store';
 
@@ -165,9 +165,9 @@ export function FindingDriverScreen() {
   return (
     <div className="relative flex-1 overflow-hidden bg-r-map-land">
       <div className="absolute inset-x-0 top-0 bottom-[380px]">
-        <RiderMap defaultCenter={trip.pickup} defaultZoom={15}>
+        <AppMap defaultCenter={trip.pickup} defaultZoom={15}>
           <SearchPulse position={trip.pickup} />
-        </RiderMap>
+        </AppMap>
       </div>
 
       {trip.phase === 'searching' && <ElapsedChip since={trip.requestedAt} />}

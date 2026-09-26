@@ -7,7 +7,7 @@ import { DriverLayout } from '../features/driver/DriverLayout';
 import { HomeScreen as DriverHomeScreen } from '../features/driver/screens/HomeScreen';
 import { MenuScreen as DriverMenuScreen } from '../features/driver/screens/MenuScreen';
 import { OffersScreen } from '../features/driver/screens/OffersScreen';
-import { TripAssignedScreen } from '../features/driver/screens/TripAssignedScreen';
+import { TripScreen as DriverTripScreen } from '../features/driver/screens/TripScreen';
 import { SignupScreen } from '../features/auth/SignupScreen';
 import { RiderLayout } from '../features/rider/RiderLayout';
 import { ConfirmPickupScreen } from '../features/rider/screens/ConfirmPickupScreen';
@@ -47,7 +47,7 @@ const signedInScreens: Record<Role, RouteObject[]> = {
         { index: true, element: <DriverHomeScreen /> },
         { path: 'menu', element: <DriverMenuScreen /> },
         { path: 'offers', element: <OffersScreen /> },
-        { path: 'trip', element: <TripAssignedScreen /> },
+        { path: 'trip', element: <DriverTripScreen /> },
       ],
     },
   ],

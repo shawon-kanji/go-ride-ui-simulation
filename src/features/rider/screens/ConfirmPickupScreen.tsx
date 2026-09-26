@@ -9,8 +9,8 @@ import { KL_CENTER } from '../../../shared/map/constants';
 import { addressRemainder, shortAddress, useReverseGeocode } from '../../../shared/places/places';
 import { Button } from '../../../shared/ui/Button';
 import { useBookingDraft } from '../booking/booking-draft';
-import { PIN_COLORS } from '../components/map-colors';
-import { PlaceDot, RiderMap } from '../components/map-pieces';
+import { PIN_COLORS } from '../../../shared/map/map-colors';
+import { PlaceDot, AppMap } from '../../../shared/map/map-pieces';
 
 // R02 Confirm pickup: full-bleed map with a fixed centre pin — the rider drags the map,
 // the pin stays put, and the spot under it is reverse-geocoded when the map settles.
@@ -72,7 +72,7 @@ export function ConfirmPickupScreen() {
   return (
     <div className="relative flex-1 overflow-hidden bg-r-map-land">
       <div className="absolute inset-x-0 top-0 bottom-[250px]">
-        <RiderMap
+        <AppMap
           defaultCenter={initialCenter}
           defaultZoom={17}
           onCameraChanged={() => setMoving(true)}
@@ -84,7 +84,7 @@ export function ConfirmPickupScreen() {
         >
           {!forDropoff && dropoff && <PlaceDot position={dropoff} kind="dropoff" />}
           {position && <PlaceDot position={position} kind="pickup" />}
-        </RiderMap>
+        </AppMap>
 
         <div className="absolute right-4 bottom-4">
           <LocateButton position={position} onLocate={() => setMoving(true)} />
