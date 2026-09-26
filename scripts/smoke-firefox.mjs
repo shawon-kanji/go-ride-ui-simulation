@@ -230,6 +230,13 @@ try {
   const d1Reloaded = await d1.reload().then(() => d1.waitForSelector('[data-testid="current-location"]'));
   check('simulated position survives a reload', (await d1Reloaded.evaluate((el) => el.textContent)) === placed);
   check('no Google Maps key errors', mapsErrors.length === 0, mapsErrors[0] ?? '');
+  // Place search (Places API (New) from the browser key) lists results; cleared again so the map stays put.
+  await sim.type('input[aria-label="Search places"]', 'KL Sentral');
+  await sim.waitForSelector('[data-testid="place-search-result"]', { timeout: 10_000 }).then(
+    () => check('simulator place search returns results', true),
+    () => check('simulator place search returns results', false),
+  );
+  await sim.click('button[aria-label="Clear search"]');
   await d1.screenshot({ path: `${OUT}/05a-driver-placed.png` });
   await sim.screenshot({ path: `${OUT}/05-simulator.png` });
 

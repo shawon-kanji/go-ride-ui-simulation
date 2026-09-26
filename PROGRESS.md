@@ -86,6 +86,10 @@ Run with `docker exec -i go-ride-postgres psql -U postgres -d go_ride -v ON_ERRO
 
 ---
 
+### Extra (2026-09-26, asked outside the phase plan)
+- [x] Simulator search box: Places (New) autocomplete biased to the visible map, keyboard navigation, result pin with
+      "Move <tab> here". Smoke checks that results come back
+
 ### Phase 3 — Rider booking happy path ✅
 - [x] 3.0 Rendered R01–R07 (`npm run handoff:shots`). **Currency → MYR** (see Decisions): cab-request-handler's
       local `.env` now has `FARE_CITY_CODE=KUL`, `FARE_CURRENCY_CODE=MYR`; added the missing KUL `RIDE_XL` row (SQL below)
@@ -172,9 +176,13 @@ Plus, in `go-ride-kafka-consumers/services/cab-request-handler/.env` (gitignored
 | 2026-09-26 | R01's back arrow → account button + sheet (log out) | R01 is the rider home; R07 profile is Phase 6 |
 | 2026-09-26 | R04 steps follow `trip_requests.status`, not per-driver rows | Riders aren't told which drivers are offered |
 | 2026-09-26 | Call/Message/Share, Later, For me, promo shown but inert | No backend support; kept for visual fidelity |
+| 2026-09-26 | Simulator place search calls Google Places (New) from the browser key | Simulator has no login, so no backend places proxy; user chose adding Places to the key over borrowing a tab's token |
 
 ## Gotchas learned
 
+- **Maps key APIs:** the browser key allows Maps JS, Directions, Routes and (since 2026-09-26) Places API (New) for
+  the simulator's search. `gcloud services api-keys update` replaces restrictions — pass the referrers and every
+  `--api-target` again. Changes take ~1 min to apply.
 - **Maps key referrers:** Google rejected `http://localhost:5173` under `http://localhost:*/*`
   alone; the key now also lists `http://localhost:5173/*` and `http://127.0.0.1:5173/*`.
   A new dev port needs adding (`gcloud services api-keys update 52b9aa5c-…`); changes take a

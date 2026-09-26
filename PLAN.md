@@ -355,9 +355,9 @@ Each phase ends with something you can run and click through.
    `http://localhost:5173/*`, `http://127.0.0.1:5173/*` (explicit ports — Google rejected
    the dev server under the `localhost:*` wildcard alone), plus `http://localhost:*/*`,
    `http://127.0.0.1:*/*`, `http://localhost/*`; APIs Maps JavaScript, Directions,
-   Routes. Stored in `go-ride-ui-simulation/.env` as `VITE_GOOGLE_MAPS_API_KEY` (gitignored).
+   Routes, and Places API (New) for the simulator's search box (added 2026-09-26). Stored in `go-ride-ui-simulation/.env` as `VITE_GOOGLE_MAPS_API_KEY` (gitignored).
    Places autocomplete, place details and reverse geocode go through the backend's
-   `/api/v1/places` proxy, so the browser key doesn't need Places.
+   `/api/v1/places` proxy for the rider and driver apps; only the simulator's search (no login) uses Places on the browser key.
 3. **Test data — use the local DB directly, no seed script.** Riders and drivers can be
    created through the web app (real API) or inserted straight into the local Postgres
    (`go-ride-postgres` container, db `go_ride`); inserted passwords must be bcrypt hashes the

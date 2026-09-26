@@ -8,7 +8,7 @@ phases, and [PROGRESS.md](PROGRESS.md) for checkpoints and the next tasks.
 |---|---|
 | `/user` | Rider app (phone frame, rider theme): where to (R01), confirm pickup (R02), pick a ride (R03), finding a driver (R04), driver on the way (R05) |
 | `/driver` | Driver app (phone frame, driver theme): home/go online (D06–D07), menu (D03), job offers (D08) |
-| `/simulator` | Every open tab on a Google map — select a tab and click the map (or drag its marker) to move its GPS. Riders' live trips show pickup/drop-off pins and a link to the assigned driver |
+| `/simulator` | Every open tab on a Google map — select a tab and click the map (or drag its marker) to move its GPS. The search box (top left) jumps to a place; with a tab selected, “Move … here” puts it there. Riders' live trips show pickup/drop-off pins and a link to the assigned driver |
 | `/health` | Pings every Go service through the dev proxy |
 
 Every tab is its own device: its own login (in `sessionStorage`), its own websocket

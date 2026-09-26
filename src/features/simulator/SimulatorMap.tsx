@@ -5,11 +5,12 @@ import { useEffect, useState } from 'react';
 import type { GeoPoint } from '../../shared/location/location-store';
 import { ActorMarker } from './ActorMarker';
 import { readMapView, saveMapView } from './map-view';
+import { FoundPlaceMarker, PlaceSearch, type FoundPlace } from './PlaceSearch';
 import { TripOverlay } from './TripOverlay';
 import { actorLabel, type RegisteredTab } from './tab-registry';
 
 // The simulator's map. Clicking the map moves the selected tab; markers can also be
-// dragged. `mapId` is required for Advanced Markers — DEMO_MAP_ID is Google's id for
+// dragged. The search box (top left) jumps to a place and can move the selected tab there. `mapId` is required for Advanced Markers — DEMO_MAP_ID is Google's id for
 // development use.
 
 const MAP_ID = 'DEMO_MAP_ID';
@@ -33,6 +34,7 @@ function FocusController({ focus }: { focus: GeoPoint | null }) {
 
 export function SimulatorMap({ tabs, selected, focus, isStale, onSelect, onMove }: SimulatorMapProps) {
   const [initialView] = useState(readMapView);
+  const [found, setFound] = useState<FoundPlace | null>(null);
   const selectedMovable = selected && selected.locationSource === 'simulated' && !isStale(selected);
 
   return (
@@ -67,10 +69,23 @@ export function SimulatorMap({ tabs, selected, focus, isStale, onSelect, onMove 
           ) : null,
         )}
         <TripOverlay tabs={tabs} />
+        {found && (
+          <FoundPlaceMarker
+            found={found}
+            movableName={selected && selectedMovable ? actorLabel(selected) : null}
+            onMoveHere={(point) => {
+              if (!selected) return;
+              onMove(selected.tabId, point);
+              setFound(null); // the tab's own marker now marks the spot
+            }}
+          />
+        )}
         <FocusController focus={focus} />
       </Map>
 
-      <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center px-4">
+      <PlaceSearch onFound={setFound} />
+
+      <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-4">
         <div className="pointer-events-auto flex items-center gap-2 rounded-pill bg-neutral-900/90 px-4 py-2 text-[13px] font-semibold text-white shadow-lg">
           <MousePointerClick size={16} />
           {!selected && 'Select a tab, then click the map to place it. Markers can be dragged.'}
