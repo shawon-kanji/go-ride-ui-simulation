@@ -458,8 +458,8 @@ Every speed change, pause, resume or reload re-anchors and re-sends `nav-route`.
 ### Tasks
 - [x] 1 Route engine (`shared/route/`) + tests
 - [x] 2 Protocol, presence additions, nav-route store, quiet playback logging + tests
-- [ ] 3 Spike: Routes JS library response shape
-- [ ] 4 Playback controller (route sources, worker ticker, playback store, persistence) + tests
+- [x] 3 Spike: Routes JS library response shape — works as planned (see Gotchas)
+- [x] 4 Playback controller (route sources, worker ticker, playback store, persistence) + tests
 - [ ] 5 Simulator drive UI, auto-drive, drive-request/ack — **checkpoint:** pings on the route (SQL)
 - [ ] 6 D09 shared route, route ETA, rotating car, Navigate
 - [ ] 7 R05 route + tween + route ETA; R06 car on the booked route
@@ -504,6 +504,12 @@ inspector.
 | 2026-09-26 | Simulator place search calls Google Places (New) from the browser key | Simulator has no login, so no backend places proxy; user chose adding Places to the key over borrowing a tab's token |
 
 ## Gotchas learned
+
+- **Routes JS library** (`google.maps.importLibrary('routes')` → `Route.computeRoutes`, checked 2026-09-27 in
+  Firefox, ~200ms): `route.path` is an array of `LatLngAltitude` (numeric `lat`/`lng`), **not** an encoded string;
+  `legs[0].steps[]` have `distanceMeters`, `staticDurationMillis`, `path`. Request `fields: ['path', 'legs',
+  'distanceMeters', 'staticDurationMillis']`, `routingPreference: 'TRAFFIC_UNAWARE'`. KLCC → Bukit Bintang is 1.3 km
+  straight but 4.46 km / 12 min by road.
 
 - **Maps key APIs:** the browser key allows Maps JS, Directions, Routes and (since 2026-09-26) Places API (New) for
   the simulator's search. `gcloud services api-keys update` replaces restrictions — pass the referrers and every
