@@ -1,8 +1,8 @@
-import { Car, Truck } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
 import { moveTab } from '../../features/simulator/commands';
+import { QuickSetup } from '../../features/simulator/setup/QuickSetup';
 import { useAutoDrive, useDriveAutomation } from '../../features/simulator/drive/use-drive-automation';
 import { usePlaybackSupervisor } from '../../features/simulator/drive/use-playback-supervisor';
 import { SimulatorMap } from '../../features/simulator/SimulatorMap';
@@ -19,8 +19,8 @@ import { ErrorBoundary } from '../../shared/ui/ErrorBoundary';
 // Full-screen simulator: open tabs on the left, the map on the right. Select a tab and
 // click the map (or drag its marker) to move that tab's simulated GPS. A driver on a trip
 // can be driven along real roads (its playback card, or auto-drive).
-// Phone tabs open with `noopener`: a tab opened with an opener shares the simulator's
-// process and main thread, so its rendering would stall the simulator's map.
+// Phone tabs open with `noopener` (quick setup): a tab opened with an opener shares the
+// simulator's process and main thread, so its rendering would stall the simulator's map.
 
 const HAS_MAPS_KEY = Boolean(import.meta.env.VITE_GOOGLE_MAPS_API_KEY);
 
@@ -71,22 +71,7 @@ export function SimulatorPage() {
             ← Go Ride
           </Link>
           <h1 className="mt-1 text-[24px] font-extrabold tracking-[-0.02em]">Simulator</h1>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              onClick={() => window.open('/user', '_blank', 'noopener')}
-              className="flex flex-1 items-center justify-center gap-2 rounded-control bg-[#00a04a] px-3 py-2 text-[13px] font-bold text-white hover:bg-[#008a3f]"
-            >
-              <Car size={16} /> Open rider tab
-            </button>
-            <button
-              type="button"
-              onClick={() => window.open('/driver', '_blank', 'noopener')}
-              className="flex flex-1 items-center justify-center gap-2 rounded-control bg-primary-500 px-3 py-2 text-[13px] font-bold text-white hover:bg-primary-600"
-            >
-              <Truck size={16} /> Open driver tab
-            </button>
-          </div>
+          <QuickSetup />
           <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-control bg-white px-3 py-2 text-[13px] ring-1 ring-neutral-200">
             <input
               type="checkbox"

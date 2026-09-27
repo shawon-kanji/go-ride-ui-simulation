@@ -528,7 +528,7 @@ online; layouts. **Monitoring (merged timeline, trip inspector) is deferred** â€
 - [x] 5b.1 Backend: YAML, config flag, domain/application `testaccount`, readiness + seeder infrastructure, handler +
       route, `cmd/seed`, constitution amendment, tests; run the seed locally; branch + PR (public repo)
 - [x] 5b.2 Simulator API client + auto sign-in via `?as=` on both login screens
-- [ ] 5b.3 Quick setup: counts, open N riders/drivers, pop-up-blocker detection
+- [x] 5b.3 Quick setup: counts, open N riders/drivers, pop-up-blocker detection
 - [ ] 5b.4 Scatter + `set-online`
 - [ ] 5b.5 Layouts: save / load / delete / export / import, *Open* for missing accounts
 - [ ] 5b.6 Smoke: open 3 drivers + 1 rider via quick setup (smoke allows pop-ups), scatter, online, book â†’ 3 offers;
