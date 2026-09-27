@@ -363,6 +363,7 @@ Each phase ends with something you can run and click through.
 - R07 rider profile (edit, change password); D11 profile & earnings (`/earnings`, `/stats`,
   `/trips`); D05 vehicles (register, activate gating); D04 verification hub and uploads.
 - **Done when:** every handoff screen has a web counterpart that passes the visual check.
+- Task plan, research and open questions: PROGRESS.md (planned 2026-09-27).
 
 ### Tests along the way
 - Vitest: session store, duplicate-tab guard, bus protocol, WS reconnect, location
@@ -391,6 +392,6 @@ Each phase ends with something you can run and click through.
    `PATCH /driver/online`. `GET /api/v1/dev/test-accounts` lists them for the simulator's quick setup and auto
    sign-in. Other local state (online/paused flags, stale `ongoing_trips`) may still be changed directly in the
    local Postgres when a test needs it. Local dev DB only. (Until 2026-09-27 the accounts were inserted by
-   hand; the SQL is in PROGRESS.md, Phase 2.1.) D04 upload screens still come last in Phase 6; they need a CORS
-   rule on the MinIO bucket.
+   hand; the SQL is in PROGRESS.md, Phase 2.1.) D04 uploads need no storage change: the local AIStor already
+   allows PUT from `http://localhost:5173` (checked 2026-09-27).
 4. **Add to `scripts/run-all.sh`?** Default: **yes, `npm run dev` alongside the services**.

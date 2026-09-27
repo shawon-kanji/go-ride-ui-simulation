@@ -4,7 +4,7 @@ The working log for this repo. [PLAN.md](PLAN.md) is the design; this file track
 what's next at task level, and what was learned along the way. Update it at the end of
 every working session and every phase.
 
-**Last updated:** 2026-09-27 · **Current phase:** 5b done 2026-09-27 (monitoring deferred); next: Phase 6 or deferred monitoring
+**Last updated:** 2026-09-27 · **Current phase:** 6 planned (build not started); monitoring deferred
 
 ---
 
@@ -541,6 +541,85 @@ entries logged before the simulator opened are lost. The inspector must be deriv
 endpoint lists a request's offers. Keep the performance rules: batch entries into the store, memoise rows, and render
 only the visible rows.
 
+## Next: Phase 6 — Remaining screens (planned 2026-09-27)
+
+**Goal:** every handoff screen has a web version: R07 Rider profile, D11 Driver profile, D05 Vehicles and D04
+Verification hub. The menu and account entry points then lead to them instead of being inert.
+
+**Done when:**
+1. A rider can open R07, edit their name, change their password, see recent trips, and log out or deactivate.
+2. A driver can open D11 (rating, trips, status, this week's earnings by day, recent trips), edit their name, and
+   log out (going offline first).
+3. A new driver can register a vehicle on D05, upload all 10 documents on D04 from the browser, and, once they
+   are approved, activate the vehicle and go online.
+4. Each screen passes a side-by-side visual check against its `handoff:shots` render.
+
+### Research (2026-09-27)
+- **Designs** rendered with `handoff:shots`: D04 has a status pill, a blocking banner, an identity track (5 slots:
+  approved / in review / rejected with a reason and *Re-upload* / empty with *Upload*) and a vehicle track (5 slots,
+  headed by the plate). D05 has vehicle cards (Active/Inactive, plate, "x of 5 approved", *Activate*, a "what's
+  missing" strip with *Fix* → D04) and an add-vehicle form. D11 has a header with rating/trips/status, a
+  this-week earnings card with daily bars, recent trips, a Verification row and Log out. R07 has a header with
+  trips/rating, saved places, recent trips, payment, and a settings gear.
+- **Ports:** both Expo apps already implement these screens: driver `app/(app)/verify|vehicles|profile`,
+  `features/kyc|vehicles|profile`; rider `app/(app)/(tabs)/profile` (+ edit, change-password). The web versions
+  port their logic, as in earlier phases.
+- **Endpoints all exist:** rider `GET /me`, `PATCH /profile`, `POST /change-password`, `POST /deactivate`,
+  `GET /cab/trips`. Driver `GET/PATCH /driver/profile`, `/driver/vehicles` (list, register, get, update, activate,
+  delete), `/driver/kyc/documents/upload-url` → PUT to storage → `/documents/confirm`, `/driver/kyc/status`,
+  `/driver-trips/earnings?period=` (**has `daily[]`** for the bars), `/stats` (rating, trip count), `/trips`.
+- **Browser uploads work as is:** AIStor answers a PUT preflight from `http://localhost:5173` (checked 2026-09-27).
+  The "needs a MinIO CORS rule" note from earlier is wrong, so there's no infra change. The PUT must go straight to the
+  presigned URL with the exact `Content-Type` sent to `upload-url` (the app's `kyc-upload.ts` explains why).
+- **Nothing approves documents:** confirm moves them to `in review`; approval and rejection are "applied outside the
+  API" (backend comment). Testing the D04 → D05 → online path therefore needs approvals by DB edit, or a dev tool
+  (question 1).
+- **Registering a vehicle needs model and colour** as well as plate/seats/category. The design's form omits them;
+  the web form adds them.
+- **No rider rating exists:** `trip_ratings` only rates drivers. There's no saved-places backend either (question 2).
+
+### Design
+- **Routes:** `/user/profile` (R07; R01's account button goes here instead of the sheet), `/driver/profile`
+  (D11), `/driver/vehicles` (D05), `/driver/verify` (D04, `?vehicle=<id>` to scope the vehicle track). They
+  replace the inert D03 menu rows; *Earnings* and *Trip history* open D11's sections.
+- **Edits and settings** use the existing `ModalSheet`: edit name; change password (current + new, the app's
+  schema); deactivate (confirm, then signed out).
+- **Recent trips** (R07, D11) come from the history endpoints, with place names from the backend's reverse-geocode
+  proxy (`usePlaceLabel`, cached) because history rows only have coordinates.
+- **D11 earnings:** `period=week`, with bars Mon–Sun from `daily[]` and today highlighted. The trip count and
+  total come from the same response.
+- **D05:** the approved-document count per vehicle comes from `/kyc/status` documents for that `vehicle_id`,
+  using the same `deriveOnlineGate` rules as D06/D07. *Activate* is disabled until identity and that vehicle
+  are approved, and a 403 is mapped with `kycBlockReason`. Registering goes to D04 scoped to the new vehicle.
+- **D04 upload:** a hidden `<input type=file accept="image/jpeg,image/png">` per slot (`capture` on mobile
+  browsers). The flow is `upload-url` → `fetch PUT` with the file's type, outside `apiRequest` → `confirm` →
+  refetch status. Each slot shows its own progress and error. Re-uploading an *approved* document asks first,
+  because it sends KYC back to in review (the app's `ReuploadConfirmDialog`).
+- **Log out** (D11, R07): a driver goes offline first if online (spec D11), then the session is cleared.
+
+### Tasks
+- [ ] 6.1 R07 Rider profile: route + header, edit-name sheet, trips tile, recent trips with place names, inert
+      saved places / payment rows, settings sheet (change password, deactivate, log out); R01 account button → R07
+- [ ] 6.2 D11 Driver profile: header tiles from `/stats` + profile, week earnings card with daily bars, recent trips,
+      Verification row → D04, edit name, log out (offline first); D03 rows Profile/Earnings/Trip history → D11
+- [ ] 6.3 D05 Vehicles: cards with document counts, Activate with gating, "what's missing" + Fix → D04, add-vehicle
+      form (+ model, colour) → D04 for the new vehicle; delete an inactive vehicle
+- [ ] 6.4 D04 Verification hub: tracks, slots, status pill, blocking banner, vehicle selector, file upload flow,
+      re-upload confirmation; the D06 banner and D07 *Switch vehicle* go to D04/D05
+- [ ] 6.5 Tests: unit (earnings bars mapping, vehicle document counts, upload flow with fake fetch, profile schemas);
+      smoke: rider edits name and changes password (and back); a new throwaway driver signs up, registers a vehicle,
+      uploads 10 documents (small PNG), gets approved (DB edit, or the dev tool), activates, goes online
+- [ ] 6.6 Visual pass against the four `handoff:shots` renders; update README/PLAN/this file; commit per screen, push
+
+### Questions for the user
+1. **Approving uploaded documents.** Nothing in the API approves or rejects them. Recommended for now: approve by
+   DB edit in the smoke test and by hand when testing (fits the "local state via DB" rule), and keep D04/D05
+   honest about "in review". Alternative: a dev-only `POST /api/v1/dev/kyc/documents/{id}/review` in go-ride-backend
+   (behind `DEV_TOOLS_ENABLED`) plus a small "Review documents" card in the simulator, a bigger scope.
+2. **R07 items with no backend:** saved places (Home/Work) and the rider rating. Recommended: show saved places and
+   Payment · cash as inert rows (like Call/Message on R05), and replace the rating tile with trips completed plus
+   "member since". Alternative: keep Home/Work in this browser's storage per account.
+
 ## Decisions log
 
 | Date | Decision | Why |
@@ -699,5 +778,5 @@ only the visible rows.
 - Rider cancel reasons map to the enum (`rider_requested`/`other`) with the wording in `note`; the backend has no
   rider-specific reasons.
 - Simulator actor labels overlap when a rider and driver stand close together.
-- D04/D05 screens (verification, vehicles) and D09–D11 not built yet (Phases 4 and 6).
+- D04, D05, D11 and R07 not built yet (Phase 6).
 - ~~Car movement along a route~~ — done in Phase 5 (2026-09-27).
