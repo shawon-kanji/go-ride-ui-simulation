@@ -13,7 +13,12 @@
 // simulator moves it on the rider's map. Phase 4: driver 1 cancels before pickup (D10)
 // and the request is redispatched to driver 2; driver 2 starts with the PIN (a wrong one
 // is rejected), ends, collects cash; the rider sees R06, pays and rates; then a second
-// booking the rider cancels mid-trip.
+// booking the rider cancels mid-trip. Phase 5: the simulator drives driver 2 along real
+// roads — D09's Navigate without a simulator says so; auto-drive takes the car to the
+// pickup (every stored ping on the route, D09 and R05 on the same route, the rider's ETA
+// counting down to "Arriving now"); pause holds the car; a manual move stops the drive
+// and un-shares the route; Navigate restarts it; after the PIN it drives the booked route
+// to the drop-off.
 // Needs the Go stack and the go-ride-postgres container. Screenshots go to SMOKE_OUT
 // (default ./test-results/smoke).
 
@@ -165,6 +170,73 @@ async function acceptOffer(page) {
   await page.waitForSelector('[data-testid="offer-card"][data-state="live"]', { timeout: 30_000 });
   await (await page.waitForSelector(buttonXPath('Accept', '//article[@data-testid="offer-card"]'))).click();
   await page.waitForSelector('[data-testid="start-pin-input"]', { timeout: 10_000 });
+}
+
+/** Google encoded polyline → points (as src/shared/route/polyline.ts). */
+function decodePolyline(encoded) {
+  const points = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  const next = () => {
+    let result = 0;
+    let shift = 0;
+    let byte;
+    do {
+      byte = encoded.charCodeAt(index++) - 63;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    return result & 1 ? ~(result >> 1) : result >> 1;
+  };
+  while (index < encoded.length) {
+    lat += next();
+    lng += next();
+    points.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+  return points;
+}
+
+/** Metres from a point to the nearest part of a path (flat projection per segment). */
+function metresOffPath(point, path) {
+  const metresPerDeg = (Math.PI / 180) * 6_371_008.8;
+  let best = Infinity;
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i];
+    const b = path[i + 1];
+    const kx = metresPerDeg * Math.cos((a.lat * Math.PI) / 180);
+    const bx = (b.lng - a.lng) * kx;
+    const by = (b.lat - a.lat) * metresPerDeg;
+    const px = (point.lng - a.lng) * kx;
+    const py = (point.lat - a.lat) * metresPerDeg;
+    const lengthSq = bx * bx + by * by;
+    const f = lengthSq ? Math.max(0, Math.min(1, (px * bx + py * by) / lengthSq)) : 0;
+    best = Math.min(best, Math.hypot(px - bx * f, py - by * f));
+  }
+  return best;
+}
+
+/** The routes a tab holds from the simulator (nav-route), per leg. */
+const navRoutes = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem('goride:nav-routes') ?? 'null')?.routes ?? {});
+
+/**
+ * driver_locations holds one row per driver, so every ping is collected by polling it
+ * (pings are ≥10s apart) until `done()` says to stop.
+ */
+async function collectPings(driverId, sinceMs, done, timeoutMs = 240_000) {
+  const since = new Date(sinceMs).toISOString();
+  const pings = new Map();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const row = sql(`select latitude, longitude, recorded_at from driver_locations where driver_id = '${driverId}' and recorded_at >= '${since}'`);
+    if (row) {
+      const [lat, lng, at] = row.split('|');
+      pings.set(at, { lat: Number(lat), lng: Number(lng) });
+    }
+    if (await done(pings)) break;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return [...pings.values()];
 }
 
 async function newPage(browser) {
@@ -546,6 +618,144 @@ try {
     );
     await d2.screenshot({ path: `${OUT}/24-driver-rider-cancelled.png` });
     requestId = null;
+
+    // 6d. Phase 5: driving along real roads. Driver 2 ~850 m (2.7 km by road) from the rider.
+    await (await d2.waitForSelector(buttonXPath('Back to map'))).click();
+    const d2TabId = await tabId(d2);
+    const d2Id = await d2.evaluate(() => JSON.parse(sessionStorage.getItem('goride:session:driver')).user.id);
+    await placeTab(sim, d2TabId, 3.149, 101.7133);
+    await placeTab(sim, await tabId(r1), 3.1552, 101.7178);
+    await sim.close();
+    await bookFromR01(r1, 1);
+    requestId = (await riderTrip(r1))?.requestId ?? null;
+    await acceptOffer(d2);
+
+    await (await d2.waitForSelector(buttonXPath('Navigate'))).click();
+    await d2
+      .waitForFunction(() => document.querySelector('[data-testid="navigate-error"]')?.textContent === 'Open the simulator to drive.', { timeout: 5_000, polling: 200 })
+      .then(
+        () => check('D09 Navigate without a simulator says to open one', true),
+        () => check('D09 Navigate without a simulator says to open one', false),
+      );
+
+    // A new simulator with auto-drive on picks up the trip and drives to the pickup.
+    const sim5 = await newPage(browser);
+    await sim5.goto(`${BASE}/simulator`);
+    await sim5.evaluate(() => localStorage.setItem('goride:sim-auto-drive', '1'));
+    await sim5.reload();
+    const card = `[data-testid="playback-${d2TabId}"]`;
+    const cardText = () => sim5.$eval(card, (el) => el.textContent).catch(() => '');
+    const speedButton = (factor) => sim5.waitForSelector(`xpath/.//*[@data-testid="playback-${d2TabId}"]//button[normalize-space()="×${factor}"]`);
+    const waitForCard = (...parts) =>
+      sim5.waitForFunction((c, p) => p.every((part) => document.querySelector(c)?.textContent.includes(part)), { timeout: 20_000, polling: 250 }, card, parts);
+    await waitForCard('To pickup', 'Driving').then(
+      () => check('auto-drive starts the drive to the pickup', true),
+      () => check('auto-drive starts the drive to the pickup', false),
+    );
+    await (await speedButton(10)).click();
+
+    // Pause holds the car.
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    await (await sim5.waitForSelector(`${card} button[aria-label="Pause"]`)).click();
+    const heldAt = await d2.evaluate(() => JSON.parse(sessionStorage.getItem('goride:location')).simulated);
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+    const stillAt = await d2.evaluate(() => JSON.parse(sessionStorage.getItem('goride:location')).simulated);
+    check('pause holds the car', heldAt.lat === stillAt.lat && heldAt.lng === stillAt.lng && heldAt.lat !== 3.149, `${heldAt.lat}, ${heldAt.lng}`);
+
+    // A manual move (select the driver, centre the map on it, click the map beside its
+    // marker) stops the drive and un-shares the route in both apps.
+    await sim5.click(`[data-testid="tab-row-${d2TabId}"] button[aria-label="Show on map"]`);
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const mapBox = await (await sim5.$('main')).boundingBox();
+    await sim5.mouse.click(mapBox.x + mapBox.width / 2 - 80, mapBox.y + mapBox.height / 2 - 80);
+    await sim5.keyboard.press('Escape');
+    await waitForCard('Drive to pickup').then(
+      () => check('a manual move stops the drive', true),
+      () => check('a manual move stops the drive', false),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    check('a manual move un-shares the route in both apps', !(await navRoutes(d2)).pickup && !(await navRoutes(r1)).pickup);
+
+    // Navigate restarts it; this drive runs to the pickup.
+    await d2.bringToFront();
+    await (await d2.waitForSelector(buttonXPath('Navigate'))).click();
+    await sim5.bringToFront();
+    await waitForCard('To pickup', 'Driving').then(
+      () => check('D09 Navigate restarts the drive', true),
+      () => check('D09 Navigate restarts the drive', false),
+    );
+    await (await speedButton(10)).click();
+    const pickupStart = Date.now() - 1_000;
+    const etas = [];
+    let arrivedAt = null;
+    const pickupPings = await collectPings(d2Id, pickupStart, async () => {
+      const eta = await r1.$eval('[data-testid="trip-eta"]', (el) => el.textContent).catch(() => null);
+      if (eta && eta !== etas.at(-1)) etas.push(eta);
+      if (arrivedAt === null && (await cardText()).includes('Arrived')) arrivedAt = Date.now();
+      // The last ping lands up to ~15s after arrival (10s floor, 5s tick); R05 then glides to it.
+      return arrivedAt !== null && (eta === 'Arriving now' || Date.now() - arrivedAt > 30_000);
+    });
+    check('the car drives itself to the pickup', arrivedAt !== null);
+    const pickupRoute = (await navRoutes(d2)).pickup?.path ?? '';
+    const pickupPath = decodePolyline(pickupRoute);
+    const worstPickup = Math.max(...pickupPings.map((p) => metresOffPath(p, pickupPath)));
+    check('every stored ping lies on the route to the pickup', pickupPings.length >= 2 && worstPickup <= 25, `${pickupPings.length} pings, worst ${worstPickup.toFixed(1)} m`);
+    const d09Route = await d2.$eval('[data-testid="trip-map"]', (el) => el.dataset.route);
+    const r05Route = await r1.$eval('[data-testid="trip-map"]', (el) => el.dataset.route).catch(() => null);
+    check('D09 and R05 draw the same route', pickupRoute !== '' && d09Route === pickupRoute && r05Route === pickupRoute, `${pickupPath.length} points`);
+    const minutes = etas.map((t) => (t === 'Arriving now' ? 0 : Number.parseInt(t, 10))).filter((n) => !Number.isNaN(n));
+    check('the rider’s ETA never goes up', minutes.every((m, i) => i === 0 || m <= minutes[i - 1]), etas.join(' → '));
+    check('the rider’s ETA reaches "Arriving now"', etas.at(-1) === 'Arriving now', etas.at(-1) ?? 'none');
+    await r1.bringToFront();
+    await r1.screenshot({ path: `${OUT}/25-rider-driver-arriving.png` });
+    await d2.bringToFront();
+    await d2.screenshot({ path: `${OUT}/25-driver-at-pickup.png` });
+
+    // Start with the PIN: auto-drive takes the booked route to the drop-off.
+    const pin5 = (await r1.$eval('[data-testid="start-pin"]', (el) => el.textContent)).trim();
+    await enterPin(d2, pin5);
+    await (await d2.waitForSelector(buttonXPath('Start trip'))).click();
+    await d2.waitForSelector('[data-testid="collect-fare"]', { timeout: 10_000 });
+    await sim5.bringToFront();
+    await waitForCard('To drop-off', 'Driving').then(
+      () => check('auto-drive starts the drive to the drop-off', true),
+      () => check('auto-drive starts the drive to the drop-off', false),
+    );
+    await (await speedButton(5)).click();
+    const dropoffStart = Date.now() - 1_000;
+    let r06Shot = false;
+    const dropoffPings = await collectPings(d2Id, dropoffStart, async (pings) => {
+      if (!r06Shot && pings.size >= 2) {
+        r06Shot = true;
+        await r1.bringToFront();
+        await r1.screenshot({ path: `${OUT}/26-rider-on-trip-driven.png` });
+        await sim5.bringToFront();
+      }
+      return (await cardText()).includes('Arrived');
+    });
+    const booked = (await riderTrip(r1))?.route?.polyline;
+    const dropoffRoute = (await navRoutes(d2)).dropoff?.path;
+    check('the drive to the drop-off follows the booked route', !!booked && dropoffRoute === booked);
+    const worstDropoff = Math.max(...dropoffPings.map((p) => metresOffPath(p, decodePolyline(dropoffRoute ?? ''))));
+    check('every stored ping lies on the route to the drop-off', dropoffPings.length >= 2 && worstDropoff <= 25, `${dropoffPings.length} pings, worst ${worstDropoff.toFixed(1)} m`);
+    const r06Route = await r1.$eval('[data-testid="trip-map"]', (el) => el.dataset.route).catch(() => null);
+    check('R06 draws the same route', r06Route === dropoffRoute);
+
+    // End + collect as before; the finished trip's route is cleared everywhere.
+    await d2.bringToFront();
+    await (await d2.waitForSelector(buttonXPath('End trip'))).click();
+    await (await d2.waitForSelector(buttonXPath('Cash collected'), { timeout: 10_000 })).click();
+    await d2.waitForSelector('[data-testid="trip-ended"]', { timeout: 10_000 });
+    requestId = null;
+    await sim5.bringToFront();
+    await sim5.waitForFunction((c) => !document.querySelector(c), { timeout: 15_000, polling: 250 }, card).then(
+      () => check('the finished trip’s drive is removed from the simulator', true),
+      () => check('the finished trip’s drive is removed from the simulator', false),
+    );
+    check('the finished trip’s route is cleared in the driver tab', Object.keys(await navRoutes(d2)).length === 0);
+    await (await d2.waitForSelector(buttonXPath('Back to map'))).click();
+    await r1.bringToFront();
+    await (await r1.waitForSelector(buttonXPath('Submit rating'), { timeout: 10_000 }).catch(() => null))?.click();
   } finally {
     // Cancel as the rider if the run stopped half way, then take both drivers offline.
     if (requestId) {

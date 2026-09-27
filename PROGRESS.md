@@ -465,7 +465,7 @@ Every speed change, pause, resume or reload re-anchors and re-sends `nav-route`.
       car stops 43 m from the pickup pin (nearest road point)
 - [x] 6 D09 shared route, route ETA, rotating car, Navigate
 - [x] 7 R05 route + tween + route ETA; R06 car on the booked route
-- [ ] 8 Smoke test additions
+- [x] 8 Smoke test additions — `smoke:firefox` 75/75
 - [ ] 9 Checkpoint docs, commit, push
 
 ### Phase 5b (after 5) — the rest of PLAN §6
