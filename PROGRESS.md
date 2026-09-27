@@ -4,7 +4,7 @@ The working log for this repo. [PLAN.md](PLAN.md) is the design; this file track
 what's next at task level, and what was learned along the way. Update it at the end of
 every working session and every phase.
 
-**Last updated:** 2026-09-26 · **Current phase:** 5 (research + design done, build not started)
+**Last updated:** 2026-09-27 · **Current phase:** 5 (build plan done, build not started)
 
 ---
 
@@ -367,34 +367,104 @@ nav-route-clear { requestId, leg }
 **Presence additions:** the driver tab announces its trip (requestId, phase, pickup, drop-off). The rider's trip marker
 gains `requestId` and the booked `routePolyline`, so the simulator can build leg 2.
 
-### 5.1 Route engine (pure, `features/simulator/drive/`)
-- [ ] Polyline decode/encode (own, tested against Google's sample string), densify, haversine, bearing, turn angles
-- [ ] Movement profile + `positionAt(t)`; snap-to-route (nearest point, metres along); remaining metres/time
-- [ ] Unit tests: stays on the path at every t, monotonic progress, ends exactly at the destination with speed 0,
-      corner slowdown, acceleration limits, total time vs step durations (±15%), snapping
+### Build plan (2026-09-27)
+Refinements to the design above, found by reading the code before building:
 
-### 5.2 Route sources + playback controller (simulator)
-- [ ] `computeRoutes` for leg 1 (and the leg 2 fallback); leg 2 from the rider's booked polyline via presence
-- [ ] Worker ticker, wall-clock controller, speed/pause/stop, stop on manual move or stale tab; `heading` on
-      `set-location` (optional field; the location store keeps it)
-- [ ] Presence additions (driver trip; rider `requestId` + `routePolyline`); `nav-route` / `nav-route-clear` / re-send on `whois`
-- [ ] Simulator UI: route on the map, playback card per driver on a trip, auto-drive toggle, `drive-request` handling
+| # | Finding in the code | Plan change |
+|---|---|---|
+| R1 | The rider and driver apps need the same movement profile to draw progress, ETA and R06's car | The engine lives in **`src/shared/route/`**, not `features/simulator/drive/`. Both sides rebuild the identical profile from `path + steps`, so `nav-route` carries no per-tick data |
+| R2 | Every `logEvent` is also posted on the bus (`devlog-store`), and `applySimulated` logs each fix | At 4 Hz × N drivers the dev log and bus flood. `set-location` gains `playback: true`; the location store logs playback fixes at most once per 5 s |
+| R3 | Redispatch reuses the `requestId` (Gotchas) | `nav-route` also carries `driverId`; the rider accepts a route only when it matches `trip.driver.id` |
+| R4 | A driver-tab reload sends `bye`, then a fresh presence | Stale tab or `bye` → **pause** playback (anchor held), auto-resume when the same `tabId` announces again. A manual move (click/drag/search) still **stops** it. This differs from the design above, which said stale → stop |
+| R5 | A reloaded app tab has nothing to ask for routes; `whois` comes only from the simulator | Tabs persist routes in `sessionStorage`; the simulator also re-sends active `nav-route`s when a tab's first presence arrives (new tab or after `bye`) |
+| R6 | The simulator keeps no state across its own reload | Active playbacks (route, anchor, speed, paused) persist in the simulator's `sessionStorage`. Playback is wall-clock based, so it resumes exactly where it would be |
+| R7 | The driver presence has only an `activity` string, no trip | Add `driverTrip?: {requestId, ongoingTripId, phase, pickup, dropoff}` to `TabPresence` (set via the activity store from the driver runtime) |
+| R8 | D09's Navigate button can't tell whether a simulator is open | `drive-request` → the simulator answers `drive-ack {tabId, ok, reason?}`. No ack in 1.5 s → "Open the simulator to drive" |
+| R9 | The booked polyline starts at the pickup, but the driver may enter the PIN some distance away | Leg 2 uses the booked polyline if the driver is ≤100 m from its start; otherwise `computeRoutes(driver → drop-off)` (the rider then sees that route instead) |
+| R10 | The Routes JS library's field names were checked only against REST (`staticDuration`), not `google.maps.routes.Route` | A short spike before 5.2 confirms `computeRoutes` fields in the JS library (`path`, `legs[].steps[].distanceMeters / staticDurationMillis / path`) |
 
-### 5.3 Apps show the shared route
-- [ ] Shared nav-route store (per trip + leg, `sessionStorage`) in both apps
-- [ ] D09: travelled/remaining route, route-based ETA, rotating car; Navigate → `drive-request`
-- [ ] R05: route, car tween between pings along the route, route-based ETA/km (gateway values as fallback)
-- [ ] R06: estimated car on the booked route from the anchor and speed factor
+**Protocol additions** (`shared/tab/types.ts`):
+```ts
+// GeoPoint gains heading?: number (degrees, simulated only)
+| { type: 'set-location'; tabId; lat; lng; heading?: number; playback?: true }
+| { type: 'nav-route'; route: NavRoute }
+| { type: 'nav-route-clear'; requestId: string; driverId: string; leg: 'pickup' | 'dropoff' }
+| { type: 'drive-request'; tabId: string; requestId: string; leg: 'pickup' | 'dropoff' }
+| { type: 'drive-ack'; tabId: string; ok: boolean; reason?: string }
 
-### 5.4 Tests
-- [ ] Smoke: auto-drive on; book; driver accepts → the car drives itself to the pickup:
-  - every new `driver_locations` row for the trip lies ≤25 m from the route
-  - D09 and R05 hold the same encoded path
-  - the rider's ETA is non-increasing and reaches "Arriving now"
-  - start with PIN → it drives to the drop-off along the booked polyline
-  - end + collect as before
-- [ ] Smoke: pause holds the position; ×10 finishes proportionally faster; a manual move stops playback and clears the route
-- [ ] Commit per sub-area, push, update this file
+interface NavRoute {
+  requestId: string; driverId: string; leg: 'pickup' | 'dropoff';
+  path: string;                                  // encoded polyline
+  steps: { metres: number; seconds: number }[];  // one step for the booked leg
+  anchor: { atMs: number; profileT: number };    // profile time (s) at wall time atMs
+  speedFactor: 1 | 2 | 5 | 10; paused: boolean;
+}
+// position at wall time w: profile.positionAt(anchor.profileT + (paused ? 0 : (w - anchor.atMs) / 1000 * speedFactor))
+```
+Every speed change, pause, resume or reload re-anchors and re-sends `nav-route`.
+
+**Commit sequence.** Each commit is green on `npm run typecheck && npm run lint && npm test`.
+
+1. **`feat(route): route engine`** — `shared/route/`: `polyline.ts` (decode/encode), `geometry.ts` (haversine
+   reuse, bearing, turn angle, densify ≤10 m), `profile.ts` (`buildProfile(path, steps)` → `{totalSeconds,
+   totalMetres, positionAt(t), timeAtMetres(m)}`), `snap.ts` (`snapToRoute(point, hintMetres?)`, preferring the
+   match ahead of the hint so one-way loops don't snap backwards). Speed per segment from its step, corner caps
+   (>60° → 15 km/h, >30° → 25 km/h over the 30 m before), accel ≤1.5 m/s², brake ≤2.5 m/s², start and end at 0.
+   The booked leg's single cruise speed is calibrated so the total is within ±5% of the booked duration.
+   *Tests:* Google's sample string round-trips; on-path at every t; monotonic; ends at the destination with speed 0;
+   corner slowdown; accel limits; total within ±15% of the steps' sum; snapping incl. an out-and-back path.
+2. **`feat(tab): nav-route protocol and presence`** — the protocol above; `heading` + quiet playback logging in the
+   location store; `driverTrip` presence (R7); rider `TripMarker` gains `requestId`, `routePolyline`,
+   `routeDurationMinutes`; `shared/route/nav-route-store.ts` (per `requestId+leg`, `sessionStorage`, driver match
+   from R3, clear on trip end). *Tests:* store accept/ignore/replace/clear; location store logging throttle.
+3. **Spike (no commit)** — R10: call `Route.computeRoutes` from the simulator page and log the response shape.
+   Adjust `route-source.ts` below if the fields differ.
+4. **`feat(simulator): playback controller`** — `features/simulator/drive/`: `route-source.ts` (leg 1
+   `computeRoutes(driver → pickup)`, `TRAFFIC_UNAWARE`; leg 2 booked polyline or R9 fallback; errors surface, never
+   a straight line), `ticker.worker.ts` (posts a tick at 4 Hz; no state), `playback-store.ts` (zustand; per driver
+   tab: route, profile, anchor, speed, paused, status; start/pause/resume/setSpeed/stop; each tick → `set-location`
+   with heading; arrival → stop at the exact end point; persistence R6; stale/bye → pause, return → resume (R4)).
+   `moveTab` stops that tab's playback. *Tests:* with an injected clock and ticker: pause holds the position, ×10
+   finishes in 1/10 of the time, a late tick lands on the route, arrival stops, a manual move stops and clears.
+5. **`feat(simulator): drive UI and auto-drive`** — the route polyline on the simulator map (travelled grey,
+   remaining indigo; replaces TripOverlay's dashed link while a route exists); a playback card under each driver
+   on a trip in the tab list (leg, % and km left, ETA, ×1/2/5/10, pause/resume, stop, "Drive to pickup / drop-off"
+   when idle); an auto-drive toggle (`localStorage`) that starts leg 1 on `to_pickup` and leg 2 on `on_trip`; `drive-request` → `drive-ack`;
+   trip cancelled/completed → stop + `nav-route-clear`; re-send on first presence (R5).
+   **Checkpoint:** drive a real trip by hand and check every new `driver_locations` row is ≤25 m from the route (SQL).
+6. **`feat(driver): D09 follows the shared route`** — travelled/remaining polyline from the car snapped onto the
+   route; ETA pill from the remaining profile time (straight-line only without a route); car rotates with
+   `heading`; Navigate → `drive-request`, with the "Open the simulator" message on no ack.
+7. **`feat(rider): R05 and R06 follow the shared route`** — R05: remaining route from the latest `driver_location`
+   snapped (hint = previous snap); the car tweens along the route from the previous snap to the new one over the
+   measured ping gap (it trails the real car by ≤ one ping, and never moves backwards); ETA = remaining profile time
+   from the snap, minus time since the ping; "Arriving now" under 60 m; the gateway's `eta_minutes` only without a
+   route. R06: the car at `positionAt` from the anchor (label stays "estimated"); `tripProgress` takes the profile
+   when a route exists, the current formula otherwise.
+8. **`test: smoke Phase 5`** — extend `smoke-firefox.mjs`: auto-drive on, ×10; place driver 1 ~1 km from the pickup.
+   Checks: the car reaches the pickup by itself; every new `driver_locations` row for the trip is ≤25 m from the
+   route; D09 and R05 hold the same encoded path (`data-route` attribute); the rider's ETA never increases and
+   reaches "Arriving now"; PIN → it drives to the drop-off along the booked polyline; end + collect as before.
+   A second pass: pause holds the position for 5 s; a manual move stops playback and clears the route on both apps.
+9. **`docs: record Phase 5 checkpoint`** — tick tasks, commits, decisions (R1–R10), gotchas, push.
+
+**Risks.**
+- Routes API quota or cost from repeated smoke runs: one leg-1 call per run, and leg 2 reuses the booked polyline.
+- The Routes JS library may not be in the loaded Maps bundle version; the spike (step 3) catches this. REST
+  `routes.googleapis.com` with the browser key is the fallback (already verified).
+- A Firefox Worker in a hidden tab: verify in the smoke test that playback keeps moving while the simulator page is
+  in the background.
+
+### Tasks
+- [ ] 1 Route engine (`shared/route/`) + tests
+- [ ] 2 Protocol, presence additions, nav-route store, quiet playback logging + tests
+- [ ] 3 Spike: Routes JS library response shape
+- [ ] 4 Playback controller (route sources, worker ticker, playback store, persistence) + tests
+- [ ] 5 Simulator drive UI, auto-drive, drive-request/ack — **checkpoint:** pings on the route (SQL)
+- [ ] 6 D09 shared route, route ETA, rotating car, Navigate
+- [ ] 7 R05 route + tween + route ETA; R06 car on the booked route
+- [ ] 8 Smoke test additions
+- [ ] 9 Checkpoint docs, commit, push
 
 ### Phase 5b (after 5) — the rest of PLAN §6
 Quick setup (open N driver tabs, scatter online drivers), saved layouts, merged event timeline with filters, trip
