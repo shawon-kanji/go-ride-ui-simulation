@@ -66,6 +66,8 @@ export interface RiderTrip {
   driver?: TripDriver;
   startPin?: string;
   driverFix?: DriverFix;
+  /** The ping before driverFix, so R05 can glide the car between the two along the route. */
+  prevDriverFix?: DriverFix;
   finalFare?: number;
   cancelledBy?: string;
   cancelStage?: string;
@@ -139,6 +141,7 @@ function redispatch(trip: RiderTrip, at: number): RiderTrip {
     driver: undefined,
     startPin: undefined,
     driverFix: undefined,
+    prevDriverFix: undefined,
     ongoingTripId: undefined,
     redispatched: true,
     phaseAt: at,
@@ -192,6 +195,7 @@ function applyMessage(trip: RiderTrip | null, message: RiderMessage, at: number)
         driver,
         startPin: message.start_pin ?? (sameDriver ? base.startPin : undefined),
         driverFix: (sameDriver ? base.driverFix : undefined) ?? fix,
+        prevDriverFix: sameDriver ? base.prevDriverFix : undefined,
         searchStatus: undefined,
         redispatched: false,
       });
@@ -203,6 +207,7 @@ function applyMessage(trip: RiderTrip | null, message: RiderMessage, at: number)
       return {
         ...trip,
         ongoingTripId: trip.ongoingTripId ?? message.ongoing_trip_id,
+        prevDriverFix: trip.driverFix,
         driverFix: {
           lat: message.latitude,
           lng: message.longitude,

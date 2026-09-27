@@ -464,7 +464,7 @@ Every speed change, pause, resume or reload re-anchors and re-sends `nav-route`.
       2.7 km road route for 850 m straight, 7 stored pings all on the route (max 0.0 m), same route in both tabs,
       car stops 43 m from the pickup pin (nearest road point)
 - [x] 6 D09 shared route, route ETA, rotating car, Navigate
-- [ ] 7 R05 route + tween + route ETA; R06 car on the booked route
+- [x] 7 R05 route + tween + route ETA; R06 car on the booked route
 - [ ] 8 Smoke test additions
 - [ ] 9 Checkpoint docs, commit, push
 

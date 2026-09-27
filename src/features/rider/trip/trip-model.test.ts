@@ -101,6 +101,12 @@ describe('reduceTrip', () => {
     expect(trip?.driverFix).toEqual({ lat: 3.145, lng: 101.69, at: T0 + 5_000, distanceKm: 1.2, etaMinutes: 3 });
   });
 
+  it('keeps the previous ping so the car can glide between the two', () => {
+    const trip = run(requested, message(assigned), message(location(3.145), T0 + 5_000), message(location(3.146), T0 + 15_000));
+    expect(trip?.prevDriverFix).toMatchObject({ lat: 3.145, at: T0 + 5_000 });
+    expect(trip?.driverFix).toMatchObject({ lat: 3.146, at: T0 + 15_000 });
+  });
+
   it('ignores driver_location for another trip or before assignment', () => {
     expect(run(requested, message(location(3.2)))?.driverFix).toBeUndefined();
     const other = run(requested, message(assigned), message(location(3.2, { trip_id: 'trip-9' })));

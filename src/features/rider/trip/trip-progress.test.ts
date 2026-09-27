@@ -1,4 +1,8 @@
-import { tripProgress } from './trip-progress';
+import { profileFor } from '../../../shared/route/nav-route';
+import { encodePolyline } from '../../../shared/route/polyline';
+import { pathOf } from '../../../shared/route/test-paths';
+import type { NavRoute } from '../../../shared/tab/types';
+import { routeTripProgress, tripProgress } from './trip-progress';
 
 const START = Date.parse('2026-09-26T10:00:00Z');
 const trip = {
@@ -39,5 +43,37 @@ describe('tripProgress', () => {
     const p = tripProgress({ ...trip, startedAt: undefined }, START);
     expect(p.fraction).toBe(0);
     expect(p.arrivesAt).toBe(START + 20 * 60_000);
+  });
+});
+
+describe('routeTripProgress', () => {
+  const T0 = 5_000_000;
+  const route: NavRoute = {
+    requestId: 'req-1',
+    driverId: 'drv-1',
+    leg: 'dropoff',
+    path: encodePolyline(pathOf([0, 0], [2000, 0])),
+    steps: [{ metres: 2000, seconds: 240 }],
+    anchor: { atMs: T0, profileT: 0 },
+    speedFactor: 2,
+    paused: false,
+  };
+  const total = profileFor(route).totalSeconds;
+
+  it('follows the playback: halfway through the drive time, at ×2', () => {
+    const now = T0 + ((total / 2) * 1000) / 2;
+    const progress = routeTripProgress(route, now);
+    expect(progress.fraction).toBeCloseTo(0.5, 1);
+    expect(progress.remainingMinutes).toBeCloseTo(total / 2 / 2 / 60, 2);
+    expect(progress.arrivesAt).toBeCloseTo(T0 + (total / 2) * 1000, -2);
+    expect(progress.travelled.at(-1)).toEqual(progress.remaining[0]);
+  });
+
+  it('holds while paused and ends at the drop-off', () => {
+    const paused = routeTripProgress({ ...route, paused: true, anchor: { atMs: T0, profileT: 30 } }, T0 + 600_000);
+    expect(paused.remainingMinutes).toBeCloseTo((total - 30) / 2 / 60, 2);
+    const done = routeTripProgress(route, T0 + total * 1000);
+    expect(done.fraction).toBe(1);
+    expect(done.remainingKm).toBe(0);
   });
 });

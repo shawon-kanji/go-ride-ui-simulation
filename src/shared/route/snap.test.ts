@@ -34,6 +34,12 @@ describe('snapToRoute', () => {
     });
   });
 
+  it('a hint ahead of or behind the car on the same street doesn’t drag it along the road', () => {
+    const point = offset(ORIGIN, 200, 2);
+    expect(snapToRoute(straight, point, 234).metres).toBeCloseTo(200, 1);
+    expect(snapToRoute(straight, point, 160).metres).toBeCloseTo(200, 1);
+  });
+
   it('prefers the nearest match when the ahead match is far off the road', () => {
     const lShape = buildProfile(pathOf([0, 0], [300, 0], [300, 300]));
     // A point on the first street, with a hint already past the corner: the car can't be

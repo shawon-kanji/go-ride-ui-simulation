@@ -4,32 +4,48 @@ import { useState } from 'react';
 
 import { useNow } from '../../../shared/lib/use-now';
 import { PIN_COLORS } from '../../../shared/map/map-colors';
-import { AppMap, FitBounds, PlaceDot } from '../../../shared/map/map-pieces';
+import { AppMap, CarMarker, FitBounds, PlaceDot } from '../../../shared/map/map-pieces';
+import { useNavRoute } from '../../../shared/route/nav-route-store';
 import { CancelTripSheet } from '../components/CancelTripSheet';
 import type { RiderTrip } from '../trip/trip-model';
-import { tripProgress } from '../trip/trip-progress';
+import { routeTripProgress, tripProgress } from '../trip/trip-progress';
 
 // R06 On trip. The gateway stops sending the driver's position at trip start, so the
 // map shows the booked route (no car) and the arrival time, minutes and km left are
-// estimated from the start time and the booked route — labelled as such.
+// estimated from the start time and the booked route — labelled as such. When the
+// simulator shares the route it's driving (nav-route), the estimate follows that drive
+// and a car is drawn where the drive has it — still labelled as estimated.
 
 const SHEET_HEIGHT = 400;
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 
 export function OnTripScreen({ trip }: { trip: RiderTrip }) {
-  const now = useNow(5_000);
+  const route = useNavRoute('dropoff');
+  const now = useNow(route ? 1_000 : 5_000);
   const [cancelOpen, setCancelOpen] = useState(false);
-  const progress = tripProgress(trip, now);
+  const driven = route ? routeTripProgress(route, now) : null;
+  const progress = driven ?? tripProgress(trip, now);
   const driver = trip.driver;
 
   return (
     <div className="relative flex-1 overflow-hidden bg-r-map-land">
-      <div className="absolute inset-x-0 top-0" style={{ bottom: SHEET_HEIGHT - 24 }}>
+      <div
+        data-testid="trip-map"
+        data-route={route?.path ?? ''}
+        className="absolute inset-x-0 top-0"
+        style={{ bottom: SHEET_HEIGHT - 24 }}
+      >
         <AppMap defaultCenter={trip.dropoff} defaultZoom={13}>
           <PlaceDot position={trip.pickup} kind="pickup" />
           <PlaceDot position={trip.dropoff} kind="dropoff" />
-          {trip.route?.polyline ? (
+          {driven ? (
+            <>
+              <Polyline path={driven.travelled} strokeColor={PIN_COLORS.travelled} strokeWeight={5} strokeOpacity={0.9} />
+              <Polyline path={driven.remaining} strokeColor={PIN_COLORS.route} strokeWeight={5} strokeOpacity={0.95} />
+              <CarMarker position={driven.car} heading={driven.car.heading} />
+            </>
+          ) : trip.route?.polyline ? (
             <Polyline encodedPath={trip.route.polyline} strokeColor={PIN_COLORS.route} strokeWeight={5} strokeOpacity={0.95} />
           ) : (
             <Polyline path={[trip.pickup, trip.dropoff]} strokeColor={PIN_COLORS.route} strokeWeight={4} strokeOpacity={0.7} geodesic />

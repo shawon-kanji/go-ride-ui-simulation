@@ -4,9 +4,13 @@ import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router';
 
 import { distanceKm, formatMoney } from '../../../shared/lib/format';
+import { useNow } from '../../../shared/lib/use-now';
+import { profileFor, routeBounds } from '../../../shared/route/nav-route';
+import { useNavRoute } from '../../../shared/route/nav-route-store';
 import { CancelTripSheet } from '../components/CancelTripSheet';
 import { PIN_COLORS } from '../../../shared/map/map-colors';
 import { CarMarker, FitBounds, PlaceDot, AppMap } from '../../../shared/map/map-pieces';
+import { approachView, type ApproachView } from '../trip/approach';
 import type { RiderTrip } from '../trip/trip-model';
 import { OnTripScreen } from './OnTripScreen';
 import { PayDriverScreen, TripCompleteScreen, TripEndedScreen } from './TripEndScreens';
@@ -14,10 +18,13 @@ import { useTripStore } from '../trip/trip-store';
 
 // /user/trip: R05 Driver on the way (from ride_assigned — driver, vehicle, plate, start
 // PIN — and the driver_location stream), then R06 on trip, pay your driver, trip
-// complete + rating, or how it ended.
+// complete + rating, or how it ended. When the simulator shares the route it's driving
+// (nav-route), R05 draws it, glides the car along it between location reports, and
+// takes the ETA from it; the gateway's straight-line ETA is only the fallback.
 
 const FALLBACK_SPEED_KMH = 25;
 const SHEET_HEIGHT = 440;
+const ARRIVING_WITHIN_M = 60;
 
 function useSecondsSince(at: number | undefined): number | null {
   const [now, setNow] = useState(() => Date.now());
@@ -36,11 +43,18 @@ function etaMinutes(trip: RiderTrip): number | null {
   return (distanceKm(fix, trip.pickup) / FALLBACK_SPEED_KMH) * 60;
 }
 
-function Headline({ trip }: { trip: RiderTrip }) {
-  const eta = etaMinutes(trip);
-  const metres = trip.driverFix ? distanceKm(trip.driverFix, trip.pickup) * 1000 : null;
-  const text =
-    eta === null ? 'Driver assigned' : metres !== null && metres < 60 ? 'Arriving now' : `${Math.max(1, Math.round(eta))} min away`;
+function Headline({ trip, approach }: { trip: RiderTrip; approach: ApproachView | null }) {
+  let text = 'Driver assigned';
+  if (approach) {
+    text =
+      approach.remainingMetres < ARRIVING_WITHIN_M
+        ? 'Arriving now'
+        : `${Math.max(1, Math.round(approach.remainingSeconds / 60))} min away`;
+  } else {
+    const eta = etaMinutes(trip);
+    const metres = trip.driverFix ? distanceKm(trip.driverFix, trip.pickup) * 1000 : null;
+    if (eta !== null) text = metres !== null && metres < ARRIVING_WITHIN_M ? 'Arriving now' : `${Math.max(1, Math.round(eta))} min away`;
+  }
   return (
     <div className="flex items-baseline gap-2">
       <h1 data-testid="trip-eta" className="text-[30px] font-extrabold tracking-[-0.03em] text-r-ink">
@@ -131,19 +145,40 @@ function ContactButtons() {
 function DriverOnTheWay({ trip }: { trip: RiderTrip }) {
   const [cancelOpen, setCancelOpen] = useState(false);
   const ago = useSecondsSince(trip.driverFix?.at);
+  const route = useNavRoute('pickup');
+  const now = useNow(route ? 250 : 1_000);
+  const approach = route && trip.driverFix ? approachView(route, trip.driverFix, trip.prevDriverFix, now) : null;
   const fare = trip.fareTotal !== undefined ? `${formatMoney(trip.fareTotal, trip.currency)} · cash on arrival` : 'Cash on arrival';
-  const mapPoints = trip.driverFix ? [trip.driverFix, trip.pickup] : [trip.pickup];
+  const mapPoints = route
+    ? [...routeBounds(profileFor(route)), trip.pickup]
+    : trip.driverFix
+      ? [trip.driverFix, trip.pickup]
+      : [trip.pickup];
 
   return (
     <div className="relative flex-1 overflow-hidden bg-r-map-land">
-      <div className="absolute inset-x-0 top-0" style={{ bottom: SHEET_HEIGHT - 24 }}>
+      <div
+        data-testid="trip-map"
+        data-route={route?.path ?? ''}
+        className="absolute inset-x-0 top-0"
+        style={{ bottom: SHEET_HEIGHT - 24 }}
+      >
         <AppMap defaultCenter={trip.pickup} defaultZoom={15}>
           <PlaceDot position={trip.pickup} kind="dropoff" />
-          {trip.driverFix && (
+          {approach ? (
             <>
-              <Polyline path={[trip.driverFix, trip.pickup]} strokeColor={PIN_COLORS.route} strokeWeight={5} strokeOpacity={0.9} />
-              <CarMarker position={trip.driverFix} />
+              <Polyline path={approach.remaining} strokeColor={PIN_COLORS.route} strokeWeight={5} strokeOpacity={0.9} />
+              <CarMarker position={approach.car} heading={approach.car.heading} />
             </>
+          ) : route ? (
+            <Polyline path={profileFor(route).points} strokeColor={PIN_COLORS.route} strokeWeight={5} strokeOpacity={0.9} />
+          ) : (
+            trip.driverFix && (
+              <>
+                <Polyline path={[trip.driverFix, trip.pickup]} strokeColor={PIN_COLORS.route} strokeWeight={5} strokeOpacity={0.9} />
+                <CarMarker position={trip.driverFix} />
+              </>
+            )
           )}
           <FitBounds points={mapPoints} padding={{ top: 90, bottom: 60, left: 60, right: 60 }} singleZoom={15} />
         </AppMap>
@@ -166,7 +201,7 @@ function DriverOnTheWay({ trip }: { trip: RiderTrip }) {
         style={{ maxHeight: SHEET_HEIGHT }}
       >
         <div className="mx-auto mb-3 h-1 w-11 rounded-pill bg-neutral-200" />
-        <Headline trip={trip} />
+        <Headline trip={trip} approach={approach} />
         <DriverCard trip={trip} />
         <ContactButtons />
         <StartPin pin={trip.startPin} />
