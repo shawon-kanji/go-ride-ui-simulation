@@ -333,7 +333,7 @@ Each phase ends with something you can run and click through.
 - The full task list, backend state machine and error codes are in PROGRESS.md.
 - **Done when:** the full lifecycle and both cancel paths work end to end.
 
-### Phase 5 — Realistic driving (next; research + design done 2026-09-26)
+### Phase 5 — Realistic driving ✅ (2026-09-27; both legs driven, every stored ping on the route)
 - The simulator drives a driver tab along **real roads**: Routes API `computeRoutes` for the approach, the **booked**
   route polyline for the trip. It moves at per-step road speeds with corner slowdowns and smooth acceleration, so
   there are no straight-line hops.
@@ -344,8 +344,12 @@ Each phase ends with something you can run and click through.
 - **Done when:** one click drives the assigned driver to the pickup with every ping on the route, both apps show the
   same route and a falling ETA, then the same to the drop-off.
 
-### Phase 5b — Simulator tools
-- Quick setup, saved layouts, merged event timeline with filters, trip inspector (PLAN §6 items 4–6).
+### Phase 5b — Simulator tools (next; planned 2026-09-27)
+- Quick setup (open N signed-in driver tabs, scatter, go online), saved layouts, a merged event timeline with
+  filters, and a trip inspector derived from the tabs' logs (PLAN §6 items 4–6).
+- Details and tasks: PROGRESS.md.
+- **Done when:** a 5-driver scene is set up in one click, a layout restores it, and the Trips view shows a trip's
+  phases, offers and accept race.
 
 ### Phase 6 — Remaining screens
 - R07 rider profile (edit, change password); D11 profile & earnings (`/earnings`, `/stats`,
