@@ -4,7 +4,7 @@ The working log for this repo. [PLAN.md](PLAN.md) is the design; this file track
 what's next at task level, and what was learned along the way. Update it at the end of
 every working session and every phase.
 
-**Last updated:** 2026-09-27 · **Current phase:** 5b planned, build not started (5 done 2026-09-27)
+**Last updated:** 2026-09-27 · **Current phase:** 5b in progress (test accounts + quick setup; monitoring deferred)
 
 ---
 
@@ -476,107 +476,70 @@ Every speed change, pause, resume or reload re-anchors and re-sends `nav-route`.
 - D09, R05, R06 draw the shared route; D09 Navigate asks the simulator to drive
 - Not in the smoke test: "×10 finishes proportionally faster" (covered by `playback-store.test.ts` instead)
 
-## Next: Phase 5b — Simulator tools (planned 2026-09-27)
+## Next: Phase 5b — Test accounts and quick setup (re-planned 2026-09-27)
 
-**Goal:** set up a multi-driver scene in one click, and see what happened in a trip without opening every tab's dev
-panel: a merged event timeline and a per-trip inspector.
+**Scope (user, 2026-09-27):** test accounts from one YAML file in go-ride-backend, served by a dev-only API and
+seeded by a script; auto sign-in for riders and drivers; opening several rider/driver tabs at once; scatter and go
+online; layouts. **Monitoring (merged timeline, trip inspector) is deferred** — to be handled later (see
+"Deferred: monitoring" below).
 
 **Done when:**
-1. "Open 5 drivers" opens five driver tabs, signed in as five different test drivers. "Scatter & go online" places
-   them within 1.5 km of a point and takes them online. No typing is needed.
-2. A named layout saves every tab's position and online state by account. Loading it later puts the same accounts
-   back in the same places.
-3. The simulator shows one timeline of every tab's HTTP, websocket, location and state events. It can be filtered by
-   kind, actor, text and trip, and clicking a row shows its JSON. It stays smooth with 3,000 entries while a car drives.
-4. Picking a trip shows its path through Searching → Offered → Assigned → In progress → Awaiting payment →
-   Completed/Cancelled, with times, which drivers were offered, who won the accept race (with latencies), and any
-   redispatch round.
-
-### Research (2026-09-27)
-- **No backend source for the inspector:** no endpoint lists a request's offers, and the simulator makes no backend
-  calls (PLAN §6). The inspector is therefore **derived from the tabs' logs**. It can only see what open tabs saw:
-  drivers without a tab who were offered the trip don't appear, which the inspector says.
-- **The logs are already on the bus:** every tab posts each `logEvent` as a `log` message. Nothing collects them yet,
-  and anything logged before the simulator opened is lost, so a replay request is needed.
-- **HTTP entries aren't structured:** method, path, status and latency live only in the `summary` string. They need
-  proper fields for the inspector (see 5b.1).
-- **Accounts:** only 3 test drivers exist; "open 5 drivers" needs more. They get created by direct DB edits (user
-  preference), KYC-approved with active vehicles, like drivers 1–3.
-- **Performance** (from the lag investigation): the timeline must not re-render per entry. Entries are batched into
-  the store, rows are memoised, and the list is windowed, rendering only the visible rows.
+1. `go run ./cmd/seed` (go-ride-backend, `DEV_TOOLS_ENABLED=true`) creates or updates every account in
+   `config/test-accounts.yaml`. Drivers get KYC approved, an active vehicle, and approved documents. Running it
+   again changes nothing.
+2. `GET /api/v1/dev/test-accounts` lists the accounts, the shared password and whether each one is ready (seeded and
+   able to go online). Without the flag the route doesn't exist.
+3. In the simulator, "Open 5 drivers" opens five tabs that sign themselves in as five free test drivers. Asking for
+   more than are free (ready − already signed in) is refused with the count.
+4. "Scatter & go online" places the driver tabs around a point and takes them online. A saved layout brings the same
+   accounts back to the same places.
 
 ### Design
-**Layout:** a collapsible bottom panel under the simulator map with two tabs, *Timeline* and *Trips*. Its height is
-resizable and remembered in `localStorage`. The sidebar's header gets a *Quick setup* section and a *Layouts* menu.
+**Backend** (go-ride-backend, public repo → no real secrets; follows CONSTITUTION.md):
+- `config/test-accounts.yaml`: `password` (shared) and `riders[]` {email, first_name, last_name}, plus `drivers[]`
+  {email, first_name, last_name, vehicle {plate, model, color, seats, category}}. It holds the current
+  `sim.rider1–2` and `sim.driver1–3`, plus new ones.
+- Config: `DEV_TOOLS_ENABLED` (default false) and `TEST_ACCOUNTS_FILE` (default `config/test-accounts.yaml`).
+- `domain/testaccount` (entity + errors; no table of its own → Article II exception) and `application/testaccount`
+  (ports, dto, mapper, validation, `list_test_accounts.go`, `seed_test_accounts.go`, a test per use case).
+- Readiness mirrors `UpdateOnlineStatusUseCase` (KYC approved, active vehicle, vehicle documents approved). Riders
+  must exist and be active.
+- The seed upserts by email in one transaction per account. It creates the driver the way signup does, then sets
+  KYC approved, upserts the vehicle by plate and makes it the active one, and adds the 10 approved placeholder
+  documents (`sim://placeholder/<type>`), superseding any older ones.
+- `interfaces/http`: `TestAccountHandler`, `dev_routes.go`, registered only when enabled. `cmd/seed` refuses to run
+  without the flag. Article IX gets an amendment for the second entrypoint.
 
-**Bus additions** (`shared/tab/types.ts`):
-```ts
-| { type: 'log-replay-request' }                                  // simulator → all tabs, on open
-| { type: 'log-replay'; tabId: string; entries: DevLogEntry[] }   // tab → simulator: its last 300
-| { type: 'set-online'; tabId: string; online: boolean }          // simulator → driver tab (needs OK, see below)
-```
-HTTP log entries gain structured `data.http = { method, path, status, ms }`; the summary stays as it is.
-
-**Timeline store** (`features/simulator/timeline/`):
-- A ring buffer of 3,000 entries, de-duplicated by `id` (a replay can repeat entries) and sorted by `at`.
-- Incoming entries are buffered and flushed at most every 250 ms, so the list never re-renders per entry.
-- Filters: kinds, actors (tabs), a text search over the summary, and "only trip X" using the trip index below.
-- *Follow* (stick to newest) and *Pause* (freeze the view while reading; entries keep arriving).
-- The view is a windowed list of fixed-height rows. The JSON opens in a side pane, not inline, so row height stays
-  fixed. No new dependency.
-
-**Trip index** (pure, unit-tested, `features/simulator/timeline/trip-index.ts`):
-entries → `Map<requestId, TripRecord>`, correlated from:
-- rider `POST …/request-cab` (request id, pickup, drop-off, fare) and the rider's `state` transitions
-- driver `ws-in job_offer` (offered driver, offer id, expiry) and `offer_withdrawn`
-- driver `POST …/job-offers/{id}/accept` (status + latency → the race; the offer id maps to the request)
-- rider `ws-in ride_assigned / trip_started / trip_ended / trip_completed / trip_cancelled`
-- driver start / end / collect-payment / cancel
-
-`TripRecord` holds the phases with timestamps, dispatch **rounds** (a redispatch starts a new round with its own
-offers), offers per driver (seen, accepted, lost, withdrawn, expired) and the entries that belong to the trip.
-
-**Quick setup:**
-- *Open N drivers / riders*: `window.open('/driver/login?as=<email>', '_blank', 'noopener')`, one per unused test
-  account. The login screen prefills the email and signs in automatically when `VITE_SIM_PASSWORD` is set (see the
-  first question below).
-- *Scatter*: places the selected driver tabs, or all of them, at random points within a radius (default 1.5 km)
-  around the map centre or a clicked point, keeping at least 150 m between drivers. It uses plain `set-location`.
-- *Go online / offline*: sends `set-online` to each driver tab. The tab runs its own D07 checks (location, KYC,
-  vehicle) and calls `PATCH /driver/online` with its own token (see the second question below).
-
-**Layouts** (`localStorage` `goride:sim-layouts`): `{ name, savedAt, view: {center, zoom}, actors: [{ email, role, lat,
-lng, online }] }`. *Load* moves each open tab whose account matches and sets its online state. Accounts without an
-open tab are listed, each with an *Open* button (quick setup). Layouts can be exported and imported as JSON.
+**Simulator:**
+- Login screens read `?as=<email>`: the tab fetches the test accounts, checks the email is listed and ready, and signs
+  itself in with the shared password. If anything fails, the form is shown prefilled. The password never goes in a
+  URL or into this repo.
+- Quick setup (sidebar): shows free/ready counts for riders and drivers. *Open N* checks N ≤ free and N ≤ 10 per
+  click, then opens `window.open('/driver/login?as=…', '_blank', 'noopener')` for the first N free accounts. It
+  watches for their presence; missing tabs mean Chrome's pop-up blocker, and it says to allow pop-ups for
+  localhost:5173.
+- Scatter: random points within a radius around the map centre, at least 150 m apart, sent with `set-location`.
+- Go online/offline: a `set-online` bus message. The driver tab runs its own D07 checks and calls the API with its
+  own token.
+- Layouts in `localStorage`: `{name, view, actors: [{email, role, lat, lng, online}]}`. Accounts without an open tab
+  get an *Open* button (auto sign-in).
 
 ### Tasks
-- [ ] 5b.1 Log plumbing: structured `data.http`; `log-replay-request` / `log-replay` (tabs answer with their last 300);
-      tests
-- [ ] 5b.2 Timeline store (ring buffer, dedupe, batched flush, filters) + tests
-- [ ] 5b.3 Bottom panel + Timeline view (windowed rows, actor colours, JSON pane, follow/pause); check it stays smooth
-      with 3,000 entries while a car drives (Chrome profile, as in the lag investigation)
-- [ ] 5b.4 Trip index (pure) + tests from recorded log fixtures (happy path, redispatch, rider cancel, lost race)
-- [ ] 5b.5 Trips view: trip list (newest first, live), phase timeline, rounds and offers, "show in timeline"
-- [ ] 5b.6 Test accounts `sim.driver4`–`sim.driver8` via DB edits (KYC approved, active vehicles); record them under
-      Environment
-- [ ] 5b.7 Quick setup: open N tabs with `?as=`, auto sign-in, scatter, go online/offline
-- [ ] 5b.8 Layouts: save / load / delete / export / import; missing-account list with *Open*
-- [ ] 5b.9 Smoke additions: open 3 drivers via quick setup → scatter → online → book → the Trips view shows 3 offers,
-      the winner and the losers; the timeline filters to that trip; save a layout, move the drivers, load it and they
-      return. Commit per sub-area, push, update this file.
+- [ ] 5b.1 Backend: YAML, config flag, domain/application `testaccount`, readiness + seeder infrastructure, handler +
+      route, `cmd/seed`, constitution amendment, tests; run the seed locally; branch + PR (public repo)
+- [ ] 5b.2 Simulator API client + auto sign-in via `?as=` on both login screens
+- [ ] 5b.3 Quick setup: counts, open N riders/drivers, pop-up-blocker detection
+- [ ] 5b.4 Scatter + `set-online`
+- [ ] 5b.5 Layouts: save / load / delete / export / import, *Open* for missing accounts
+- [ ] 5b.6 Smoke: open 3 drivers + 1 rider via quick setup (smoke allows pop-ups), scatter, online, book → 3 offers;
+      a layout round trip. Commit per sub-area, update this file.
 
-### Questions for the user
-1. **Auto sign-in** for quick-setup tabs. Recommended: the shared test password in a gitignored `VITE_SIM_PASSWORD`,
-   used only when the URL has `?as=` (it never reaches the repo). Alternative: prefill the email only and type the
-   password in each tab.
-2. **`set-online` from the simulator.** Recommended: allow it. The driver tab makes the call itself with its own token,
-   like Navigate, so backend traffic stays realistic. This relaxes the 2026-09-25 rule "simulator is a fake GPS only"
-   to "the simulator can ask a tab to do what its own button does". Alternative: scatter only, and go online in each
-   tab by hand.
-
-### Out of scope
-- Redis/Kafka internals (AGENTS.md mentions them): not visible from the browser without a backend change. Possible
-  follow-up: a dev-only read-only endpoint, or tailing the service logs.
+### Deferred: monitoring (merged timeline, trip inspector)
+Researched 2026-09-27; to be picked up later. Summary: tabs already post every log entry on the bus, and nothing
+collects them. HTTP entries need structured `{method, path, status, ms}`. Tabs need a `log-replay` request because
+entries logged before the simulator opened are lost. The inspector must be derived from the tabs' logs, since no
+endpoint lists a request's offers. Keep the performance rules: batch entries into the store, memoise rows, and render
+only the visible rows.
 
 ## Decisions log
 
@@ -617,6 +580,9 @@ open tab are listed, each with an *Open* button (quick setup). Layouts can be ex
 | 2026-09-27 | Snapping keeps one match per pass along the route and picks the pass nearest the hint (the route's timing) | A "prefer ahead of the hint" rule dragged reports forward when the hint was ahead of the car |
 | 2026-09-27 | R05's car trails the real car by ≤ one location report (glides between the last two) | Rider position still comes only from the backend; no extrapolation |
 | 2026-09-27 | Car heading shown as a pointer outside the upright car badge | The handoff's badge is a side-view car; rotating it would turn it upside down |
+| 2026-09-27 | Test accounts: one YAML in go-ride-backend, a dev-only API and a seed command (user's design) | One source of truth; the simulator counts free accounts instead of hardcoding emails. Supersedes "test data via DB edits" for accounts |
+| 2026-09-27 | The simulator makes one backend call (`GET /dev/test-accounts`) and can ask a driver tab to go online | Relaxes "no backend calls" and "fake GPS only"; the tab still calls the API itself with its own token |
+| 2026-09-27 | Monitoring (timeline, trip inspector) deferred | User: handled later |
 | 2026-09-26 | Simulator place search calls Google Places (New) from the browser key | Simulator has no login, so no backend places proxy; user chose adding Places to the key over borrowing a tab's token |
 
 ## Gotchas learned
