@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 
 import { moveTab } from '../../features/simulator/commands';
 import { DriverFleet } from '../../features/simulator/setup/DriverFleet';
+import { LayoutsCard } from '../../features/simulator/setup/LayoutsCard';
 import { QuickSetup } from '../../features/simulator/setup/QuickSetup';
 import { useAutoDrive, useDriveAutomation } from '../../features/simulator/drive/use-drive-automation';
 import { usePlaybackSupervisor } from '../../features/simulator/drive/use-playback-supervisor';
@@ -59,6 +60,7 @@ export function SimulatorPage() {
   );
   const selected = selectedId ? (tabsById[selectedId] ?? null) : null;
   const isStale = useCallback((tab: RegisteredTab) => staleKey.split(',').includes(tab.tabId), [staleKey]);
+  const onFocusPoint = useCallback((point: GeoPoint) => setFocus({ ...point }), []);
   const onLocate = useCallback((tab: RegisteredTab) => {
     setSelectedId(tab.tabId);
     if (tab.location) setFocus({ ...tab.location });
@@ -66,7 +68,7 @@ export function SimulatorPage() {
 
   return (
     <div className="flex h-dvh overflow-hidden">
-      <aside className="flex w-[360px] shrink-0 flex-col border-r border-neutral-200 bg-neutral-50">
+      <aside className="flex w-[360px] shrink-0 flex-col overflow-y-auto border-r border-neutral-200 bg-neutral-50">
         <div className="px-5 pt-5 pb-4">
           <Link to="/" className="text-[13px] font-semibold text-neutral-500 hover:text-neutral-800">
             ← Go Ride
@@ -74,6 +76,7 @@ export function SimulatorPage() {
           <h1 className="mt-1 text-[24px] font-extrabold tracking-[-0.02em]">Simulator</h1>
           <QuickSetup />
           <DriverFleet />
+          <LayoutsCard onFocus={onFocusPoint} />
           <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-control bg-white px-3 py-2 text-[13px] ring-1 ring-neutral-200">
             <input
               type="checkbox"
@@ -90,7 +93,7 @@ export function SimulatorPage() {
             </span>
           </label>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div>
           <TabList
             tabs={tabs}
             selectedId={selectedId}

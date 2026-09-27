@@ -25,6 +25,14 @@ export function staleKeyOf(tabs: Iterable<RegisteredTab>, now: number): string {
     .join(',');
 }
 
+/** Signed-in driver tabs that are still announcing themselves. */
+export function liveDrivers(): RegisteredTab[] {
+  const now = Date.now();
+  return Object.values(useTabRegistry.getState().tabs).filter(
+    (t) => t.role === 'driver' && t.email && now - t.lastSeen <= STALE_AFTER_MS,
+  );
+}
+
 interface TabRegistryState {
   tabs: Record<string, RegisteredTab>;
 }

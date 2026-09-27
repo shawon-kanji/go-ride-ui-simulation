@@ -9,7 +9,7 @@ export const DEFAULT_ZOOM = 14;
 
 const VIEW_KEY = 'goride:simulator-view';
 
-interface MapView {
+export interface MapView {
   center: GeoPoint;
   zoom: number;
 }
