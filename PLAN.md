@@ -20,6 +20,8 @@ as they are; this is a second client, not a replacement.
 - Production web app, SEO, auth persistence across tabs.
 - Background location, push notifications (FCM), offline behaviour.
 - Backend changes. The plan works against the services as they are today (see "Networking").
+  One exception, added in Phase 5b: a dev-only test-accounts endpoint and seed command in go-ride-backend
+  (`DEV_TOOLS_ENABLED`), so the simulator knows which accounts exist (§6, Decisions 3).
 
 ---
 
@@ -30,7 +32,7 @@ One Vite app in `go-ride-ui-simulation/`, three routes, all on the same origin:
 ```
 /user/*        rider app       — phone frame, green rider theme
 /driver/*      driver app      — phone frame, indigo driver theme
-/simulator     control panel   — full-width map + tab list + event timeline
+/simulator     control panel   — full-width map + tab list and tools (event timeline: deferred)
 ```
 
 One origin matters for two reasons: `BroadcastChannel` only works between same-origin tabs,
@@ -225,23 +227,29 @@ re-centre button).
 
 ### Tab bus (BroadcastChannel `goride-sim`)
 
+The protocol as built (`src/shared/tab/types.ts` is the source of truth).
+
 Tabs → simulator:
 
 | Message | Payload |
 |---|---|
-| `hello` / `heartbeat` (every 2 s) / `bye` | `tabId, role, userId, name, location, locationSource, wsState, online, tripState` |
+| `presence` (on change + every 2 s) / `bye` | `tabId, role, userId, name, email, wsState, location, locationSource, activity`, the rider's `trip` (pins, request id, booked route) or the driver's `driverTrip` |
 | `log` | one event-log entry (see below) |
+| `drive-request` | `tabId, requestId, leg` — D09 Navigate |
+| `set-online-result` | `tabId, online, ok, reason?` |
 
-Simulator → tab:
+Simulator → tabs:
 
 | Message | Payload |
 |---|---|
-| `set-location` | `tabId, lat, lng` |
-| `play-route` | `tabId, path[], speedKmh` |
-| `stop-route` | `tabId` |
-| `whois` | — (everyone replies with `hello`) |
+| `set-location` | `tabId, lat, lng, heading?, playback?` |
+| `nav-route` / `nav-route-clear` | the route being driven (encoded path, step timings, wall-clock anchor, speed, paused), per trip + driver + leg |
+| `drive-ack` | `tabId, ok, reason?` |
+| `set-online` | `tabId, online` — the tab goes online/offline itself, with its own token |
+| `whois` | — (every tab re-announces) |
 
-A tab missing three heartbeats is shown as stale; `bye` is sent on `pagehide`.
+Tabs also use `tab-claim` / `tab-conflict` between themselves (duplicate-tab guard). A tab silent for 6 s is shown
+as stale; `bye` is sent on `pagehide`.
 
 ### Features
 
@@ -249,24 +257,25 @@ A tab missing three heartbeats is shown as stale; `bye` is sent on `pagehide`.
    online, offered, on trip). Pickup and drop-off pins for active trips.
 2. **Place actors** — select a tab in the list, then click the map to move it; markers are
    draggable.
-3. **Route playback** (Phase 5; design in PROGRESS.md) — drive a selected driver along a real road route at a
-   chosen speed, with the same route shown in the driver and rider apps:
-   - *To pickup* / *to drop-off* for a driver on a trip (path from the Directions API, or a
-     straight-line fallback);
-   - a freehand path drawn by clicking waypoints.
-   Playback runs in the simulator and streams `set-location` ticks; the driver tab does the
-   actual API calls.
-4. **Quick setup** — "open N driver tabs" (`window.open('/driver')`), scatter online drivers
-   around a point, save and load named layouts (positions per user email).
-5. **Event timeline** — merged, filterable log from all tabs: HTTP (method, path, status,
-   latency), WS in/out (type + payload), location pings, trip-state transitions.
-   Colour-coded by tab; click an entry to see the full JSON.
-6. **Trip inspector** — pick a trip id and see its state machine
+3. **Route playback** ✅ (Phase 5; details in PROGRESS.md) — drive a driver on a trip along a real road route:
+   the Routes API for the approach, the booked polyline for the trip. Speeds come from each route step, with
+   corner slowdowns and acceleration limits; ×1–×10, pause, stop, auto-drive. The route is shared with the driver
+   and rider apps (`nav-route`). Playback runs in the simulator from the wall clock (ticks from a worker) and
+   streams `set-location`; the driver tab does the actual API calls. (A freehand waypoint path was not built.)
+4. **Quick setup and layouts** ✅ (Phase 5b) — open N rider/driver tabs that sign themselves in as free test
+   accounts (`?as=<email>`, accounts from go-ride-backend's `GET /api/v1/dev/test-accounts`); scatter driver tabs
+   around the map centre; take them online/offline through each tab; save and load named layouts (positions and
+   online state per account email).
+5. **Event timeline** — deferred (user, 2026-09-27; research in PROGRESS.md). A merged, filterable log from all
+   tabs: HTTP (method, path, status, latency), WS in/out (type + payload), location pings, trip-state
+   transitions. Colour-coded by tab; click an entry to see the full JSON.
+6. **Trip inspector** — deferred with 5. Pick a trip id and see its state machine
    (Searching → Offered → Assigned → InProgress → AwaitingPayment → Completed/Cancelled) with
-   timestamps, which drivers were offered, and who won the accept race.
+   timestamps, which drivers were offered, and who won the accept race — derived from the tabs' logs.
 
-The simulator has no login and makes no backend calls of its own, except map services
-(tiles, directions).
+The simulator has no login. Its only backend call is the dev-only test-accounts list (Phase 5b); everything else
+goes through the tabs, each with its own token. It calls Google directly for map tiles, the Routes API and Places
+search.
 
 ---
 
@@ -344,12 +353,11 @@ Each phase ends with something you can run and click through.
 - **Done when:** one click drives the assigned driver to the pickup with every ping on the route, both apps show the
   same route and a falling ETA, then the same to the drop-off.
 
-### Phase 5b — Simulator tools (next; planned 2026-09-27)
-- Quick setup (open N signed-in driver tabs, scatter, go online), saved layouts, a merged event timeline with
-  filters, and a trip inspector derived from the tabs' logs (PLAN §6 items 4–6).
-- Details and tasks: PROGRESS.md.
-- **Done when:** a 5-driver scene is set up in one click, a layout restores it, and the Trips view shows a trip's
-  phases, offers and accept race.
+### Phase 5b — Test accounts and quick setup ✅ (2026-09-27; `smoke:firefox` 81/81)
+- Test accounts from go-ride-backend's YAML (`make seed`, dev-only `GET /api/v1/dev/test-accounts`), auto
+  sign-in (`?as=`), open N signed-in rider/driver tabs, scatter + online/offline, saved layouts (§6 item 4).
+- The event timeline and trip inspector (§6 items 5–6) are deferred.
+- Details: PROGRESS.md.
 
 ### Phase 6 — Remaining screens
 - R07 rider profile (edit, change password); D11 profile & earnings (`/earnings`, `/stats`,
@@ -377,19 +385,12 @@ Each phase ends with something you can run and click through.
    Routes, and Places API (New) for the simulator's search box (added 2026-09-26). Stored in `go-ride-ui-simulation/.env` as `VITE_GOOGLE_MAPS_API_KEY` (gitignored).
    Places autocomplete, place details and reverse geocode go through the backend's
    `/api/v1/places` proxy for the rider and driver apps; only the simulator's search (no login) uses Places on the browser key.
-3. **Test data — use the local DB directly, no seed script.** Riders and drivers can be
-   created through the web app (real API) or inserted straight into the local Postgres
-   (`go-ride-postgres` container, db `go_ride`); inserted passwords must be bcrypt hashes the
-   backend's login accepts. Data is added or changed whenever development or a test needs
-   it. To let a driver go online:
-   - `drivers.kyc_status = 'approved'`;
-   - one `vehicles` row per driver (`category` `normal`/`luxury`), `is_active = true`;
-   - current `driver_documents` rows for the 5 identity documents and the vehicle documents
-     with `status = 'approved'` (`file_url` a placeholder).
-
-   Before running this, check the exact "vehicle verified" rule in go-ride-backend's KYC and
-   vehicle-activation code, so the SQL matches what the API checks. Reset stuck state the
-   same way when needed (e.g. `is_online`/`is_paused`, stale `ongoing_trips`). Local dev DB
-   only. D04 upload screens still come last in Phase 6; they need a CORS rule on the
-   MinIO bucket.
+3. **Test data — test accounts from one YAML file (since 2026-09-27).** Riders and drivers are defined in
+   go-ride-backend's `config/test-accounts.yaml` and created or reset with `make seed` (dev tools only).
+   Drivers get KYC approved, an active vehicle and approved placeholder documents: the same gates as
+   `PATCH /driver/online`. `GET /api/v1/dev/test-accounts` lists them for the simulator's quick setup and auto
+   sign-in. Other local state (online/paused flags, stale `ongoing_trips`) may still be changed directly in the
+   local Postgres when a test needs it. Local dev DB only. (Until 2026-09-27 the accounts were inserted by
+   hand; the SQL is in PROGRESS.md, Phase 2.1.) D04 upload screens still come last in Phase 6; they need a CORS
+   rule on the MinIO bucket.
 4. **Add to `scripts/run-all.sh`?** Default: **yes, `npm run dev` alongside the services**.
