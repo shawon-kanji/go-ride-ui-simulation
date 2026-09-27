@@ -54,7 +54,9 @@ export type DriverTripEvent =
 
 const ORDER: Record<DriverTripPhase, number> = { to_pickup: 0, on_trip: 1, collecting: 2, completed: 3, cancelled: 3 };
 
-export function isActiveDriverPhase(phase: DriverTripPhase | undefined): boolean {
+export type ActiveDriverPhase = Extract<DriverTripPhase, 'to_pickup' | 'on_trip' | 'collecting'>;
+
+export function isActiveDriverPhase(phase: DriverTripPhase | undefined): phase is ActiveDriverPhase {
   return phase === 'to_pickup' || phase === 'on_trip' || phase === 'collecting';
 }
 

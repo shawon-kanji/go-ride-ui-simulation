@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router';
 
 import { logEvent } from '../../shared/devlog/devlog-store';
 import { useRealtimeStore } from '../../shared/realtime/use-realtime';
+import { useNavRouteFeed } from '../../shared/route/nav-route-store';
 import { useActivityStore } from '../../shared/tab/activity';
 import { cabClient } from './api/clients';
 import { isRiderMessage } from './api/types';
@@ -83,6 +84,9 @@ function useSimulatorActivity(): void {
             dropoff: { lat: trip.dropoff.lat, lng: trip.dropoff.lng },
             driverId: trip.driver?.id ?? null,
             driverFix: trip.driverFix ? { lat: trip.driverFix.lat, lng: trip.driverFix.lng } : null,
+            requestId: trip.requestId,
+            routePolyline: trip.route?.polyline,
+            routeDurationMinutes: trip.route?.durationMinutes,
           }
         : null,
     );
@@ -109,7 +113,12 @@ function useFollowTrip(): void {
 }
 
 export function useRiderRuntime(): void {
+  const active = useTripStore((s) => isActivePhase(s.trip?.phase));
+  const requestId = useTripStore((s) => s.trip?.requestId);
+  const driverId = useTripStore((s) => s.trip?.driver?.id);
+
   useTripFeed();
+  useNavRouteFeed(active ? requestId : null, driverId);
   useSimulatorActivity();
   useFollowTrip();
 }

@@ -16,6 +16,8 @@ export interface GeoPoint {
   lng: number;
   /** Metres; browser fixes only. */
   accuracyM?: number;
+  /** Compass degrees; simulated route playback only. */
+  heading?: number;
 }
 
 interface StoredLocation {
@@ -31,12 +33,15 @@ interface LocationState {
   simulated: GeoPoint | null;
   browserError: string | null;
   setSource: (source: LocationSource) => void;
-  applySimulated: (point: GeoPoint) => void;
+  /** `playback`: a route playback fix — these arrive several times a second, so only some are logged. */
+  applySimulated: (point: GeoPoint, options?: { playback?: boolean }) => void;
   applyBrowserFix: (point: GeoPoint) => void;
   setBrowserError: (message: string | null) => void;
 }
 
 const STORAGE_KEY = 'goride:location';
+/** Every log entry is also posted on the bus; playback fixes are logged at most this often. */
+export const PLAYBACK_LOG_EVERY_MS = 5_000;
 
 function persist(state: Pick<LocationState, 'source' | 'simulated'>): void {
   tabStorage.setJson(STORAGE_KEY, { source: state.source, simulated: state.simulated } satisfies StoredLocation);
@@ -50,6 +55,8 @@ export function createLocationStore() {
   const stored = tabStorage.getJson<StoredLocation>(STORAGE_KEY);
   const source = stored?.source ?? 'simulated';
   const simulated = stored?.simulated ?? null;
+
+  let lastPlaybackLogAt = 0;
 
   return create<LocationState>((set, get) => ({
     source,
@@ -71,11 +78,17 @@ export function createLocationStore() {
       logEvent('location', `source → ${next}`);
     },
 
-    applySimulated: (point) => {
+    applySimulated: (point, options) => {
       set({ simulated: point });
       if (get().source === 'simulated') {
-        set({ position: point, updatedAt: Date.now() });
-        logEvent('location', `simulated ${formatPoint(point)}`, point);
+        const now = Date.now();
+        set({ position: point, updatedAt: now });
+        if (!options?.playback) {
+          logEvent('location', `simulated ${formatPoint(point)}`, point);
+        } else if (now - lastPlaybackLogAt >= PLAYBACK_LOG_EVERY_MS) {
+          lastPlaybackLogAt = now;
+          logEvent('location', `driving ${formatPoint(point)}`, point);
+        }
       }
       persist(get());
     },

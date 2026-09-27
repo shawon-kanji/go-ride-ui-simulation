@@ -37,6 +37,27 @@ describe('location store', () => {
     expect(store.getState().position).toBeNull();
   });
 
+  it('logs route playback fixes only every few seconds, but applies every one', async () => {
+    vi.useFakeTimers();
+    try {
+      const { useDevLogStore } = await import('../devlog/devlog-store');
+      useDevLogStore.getState().clear();
+      const store = createLocationStore();
+      for (let i = 0; i < 40; i++) {
+        store.getState().applySimulated({ lat: KLCC.lat + i * 1e-5, lng: KLCC.lng, heading: 90 }, { playback: true });
+        vi.advanceTimersByTime(250); // 4 Hz for 10 s
+      }
+      expect(store.getState().position).toMatchObject({ lat: KLCC.lat + 39e-5, heading: 90 });
+      const logged = useDevLogStore.getState().entries.filter((e) => e.kind === 'location');
+      expect(logged).toHaveLength(2);
+
+      store.getState().applySimulated(KLCC);
+      expect(useDevLogStore.getState().entries.filter((e) => e.kind === 'location')).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('formats points to 5 decimals', () => {
     expect(formatPoint({ lat: 3.1390001, lng: 101.68694 })).toBe('3.13900, 101.68694');
   });

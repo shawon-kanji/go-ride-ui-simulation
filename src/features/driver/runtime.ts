@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { logEvent } from '../../shared/devlog/devlog-store';
 import { useLocationStore } from '../../shared/location/location-store';
 import { useRealtimeStore } from '../../shared/realtime/use-realtime';
+import { useNavRouteFeed } from '../../shared/route/nav-route-store';
 import { useDriverSession } from '../../shared/session/session-store';
 import { useActivityStore } from '../../shared/tab/activity';
 import { driverTripsClient, locationClient } from './api/clients';
@@ -111,6 +112,8 @@ const TRIP_ACTIVITY: Partial<Record<DriverTripPhase, string>> = {
 function useSimulatorActivity(isOnline: boolean | undefined, isPaused: boolean | undefined, tripPhase: DriverTripPhase | null): void {
   const openCount = useOfferStore((s) => countOpen(Object.values(s.offers)));
   const setActivity = useActivityStore((s) => s.setActivity);
+  const setDriverTrip = useActivityStore((s) => s.setDriverTrip);
+  const trip = useDriverTripStore((s) => s.trip);
 
   useEffect(() => {
     if (isOnline === undefined) setActivity(null);
@@ -121,7 +124,28 @@ function useSimulatorActivity(isOnline: boolean | undefined, isPaused: boolean |
     else setActivity('online');
   }, [isOnline, isPaused, tripPhase, openCount, setActivity]);
 
-  useEffect(() => () => setActivity(null), [setActivity]);
+  // Where the simulator should drive this tab: the pickup, then the drop-off.
+  useEffect(() => {
+    if (!trip || !isActiveDriverPhase(trip.phase)) {
+      setDriverTrip(null);
+      return;
+    }
+    setDriverTrip({
+      requestId: trip.requestId,
+      ongoingTripId: trip.ongoingTripId,
+      phase: trip.phase,
+      pickup: trip.pickup,
+      dropoff: trip.dropoff,
+    });
+  }, [trip, setDriverTrip]);
+
+  useEffect(
+    () => () => {
+      setActivity(null);
+      setDriverTrip(null);
+    },
+    [setActivity, setDriverTrip],
+  );
 }
 
 /**
@@ -169,6 +193,8 @@ export function useDriverRuntime(): void {
   const isPaused = profile?.driver.is_paused;
   const tripPhase = useDriverTripStore((s) => s.trip?.phase ?? null);
   const onTrip = isActiveDriverPhase(tripPhase ?? undefined);
+  const tripRequestId = useDriverTripStore((s) => s.trip?.requestId);
+  const driverId = useDriverSession((s) => s.user?.id);
 
   useLocationBroadcastLifecycle(isOnline);
   useOfferFeed();
@@ -176,6 +202,7 @@ export function useDriverRuntime(): void {
   useTripSync();
   useFollowTrip(onTrip);
   useSimulatorActivity(isOnline, isPaused, onTrip ? tripPhase : null);
+  useNavRouteFeed(onTrip ? tripRequestId : null, driverId);
 
   // Offers belong to an online session; going offline or signing out drops them.
   useEffect(() => {

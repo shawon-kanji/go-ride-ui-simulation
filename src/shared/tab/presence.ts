@@ -22,6 +22,7 @@ export function useTabPresence(role: Role): void {
   const locationSource = useLocationStore((s) => s.source);
   const activity = useActivityStore((s) => s.activity);
   const trip = useActivityStore((s) => s.trip);
+  const driverTrip = useActivityStore((s) => s.driverTrip);
 
   useEffect(() => {
     const announce = () => {
@@ -37,6 +38,7 @@ export function useTabPresence(role: Role): void {
         locationSource,
         activity,
         trip,
+        driverTrip,
         sentAt: Date.now(),
       };
       postBus({ type: 'presence', presence });
@@ -51,7 +53,7 @@ export function useTabPresence(role: Role): void {
       clearInterval(interval);
       unsubscribe();
     };
-  }, [role, pathname, user, wsState, location, locationSource, activity, trip]);
+  }, [role, pathname, user, wsState, location, locationSource, activity, trip, driverTrip]);
 
   useEffect(() => {
     const sayBye = () => postBus({ type: 'bye', tabId: getTabId() });

@@ -16,7 +16,12 @@ export function useLocationProvider(): void {
     () =>
       subscribeBus((message) => {
         if (message.type === 'set-location' && message.tabId === getTabId()) {
-          useLocationStore.getState().applySimulated({ lat: message.lat, lng: message.lng });
+          const point = { lat: message.lat, lng: message.lng };
+          useLocationStore
+            .getState()
+            .applySimulated(message.heading === undefined ? point : { ...point, heading: message.heading }, {
+              playback: message.playback,
+            });
         }
       }),
     [],

@@ -457,7 +457,7 @@ Every speed change, pause, resume or reload re-anchors and re-sends `nav-route`.
 
 ### Tasks
 - [x] 1 Route engine (`shared/route/`) + tests
-- [ ] 2 Protocol, presence additions, nav-route store, quiet playback logging + tests
+- [x] 2 Protocol, presence additions, nav-route store, quiet playback logging + tests
 - [ ] 3 Spike: Routes JS library response shape
 - [ ] 4 Playback controller (route sources, worker ticker, playback store, persistence) + tests
 - [ ] 5 Simulator drive UI, auto-drive, drive-request/ack — **checkpoint:** pings on the route (SQL)
