@@ -103,4 +103,8 @@ export type BusMessage =
   // Driver tab → simulator: "drive me there" (D09 Navigate), and the simulator's answer.
   | { type: 'drive-request'; tabId: string; requestId: string; leg: NavLeg }
   | { type: 'drive-ack'; tabId: string; ok: boolean; reason?: string }
+  // Simulator → one driver tab: go online/offline, as its own D07 button would (the tab checks
+  // it has a location, then calls the API with its own token), and the tab's answer.
+  | { type: 'set-online'; tabId: string; online: boolean }
+  | { type: 'set-online-result'; tabId: string; online: boolean; ok: boolean; reason?: string }
   | { type: 'log'; entry: DevLogEntry };

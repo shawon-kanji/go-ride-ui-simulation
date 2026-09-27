@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
 import { moveTab } from '../../features/simulator/commands';
+import { DriverFleet } from '../../features/simulator/setup/DriverFleet';
 import { QuickSetup } from '../../features/simulator/setup/QuickSetup';
 import { useAutoDrive, useDriveAutomation } from '../../features/simulator/drive/use-drive-automation';
 import { usePlaybackSupervisor } from '../../features/simulator/drive/use-playback-supervisor';
@@ -72,6 +73,7 @@ export function SimulatorPage() {
           </Link>
           <h1 className="mt-1 text-[24px] font-extrabold tracking-[-0.02em]">Simulator</h1>
           <QuickSetup />
+          <DriverFleet />
           <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-control bg-white px-3 py-2 text-[13px] ring-1 ring-neutral-200">
             <input
               type="checkbox"

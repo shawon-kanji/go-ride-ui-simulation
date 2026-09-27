@@ -12,6 +12,7 @@ import { useCurrentTripQuery, useDriverProfileQuery } from './api/queries';
 import type { JobOfferMessage, OfferWithdrawnMessage, TripCancelledMessage } from './api/types';
 import { countOpen, useOfferStore } from './offers/offer-store';
 import { createLocationBroadcaster } from './presence/location-broadcaster';
+import { useSimulatorOnlineRequests } from './presence/use-simulator-online';
 import { isActiveDriverPhase, type DriverTripPhase } from './trip/trip-model';
 import { dispatchDriverTrip, useDriverTripStore } from './trip/trip-store';
 
@@ -203,6 +204,7 @@ export function useDriverRuntime(): void {
   useFollowTrip(onTrip);
   useSimulatorActivity(isOnline, isPaused, onTrip ? tripPhase : null);
   useNavRouteFeed(onTrip ? tripRequestId : null, driverId);
+  useSimulatorOnlineRequests();
 
   // Offers belong to an online session; going offline or signing out drops them.
   useEffect(() => {
