@@ -1,15 +1,17 @@
-import { Car, Lock, Truck, type LucideIcon } from 'lucide-react';
+import { Car, Loader2, Lock, Truck, type LucideIcon } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 
 import { sessionStores } from '../../shared/session/session-store';
 import type { Role } from '../../shared/tab/types';
 import { Banner } from '../../shared/ui/Banner';
+import { useAutoSignIn } from './auto-sign-in';
 import { LoginForm } from './LoginForm';
 
 // Layout ported from go-ride-driver-app's (auth)/login.tsx (D01 Sign in): brand header
 // with wordmark, 30px/800 title, then the form on white. The rider app has no designed
 // sign-in screen, so the rider version reuses this layout in the rider theme.
+// ?as=<email> signs the tab in as that test account (the simulator's quick setup).
 
 const COPY: Record<Role, { icon: LucideIcon; wordmark: string; signupPrompt: string; signupLink: string; signupHref: string }> = {
   driver: {
@@ -31,6 +33,8 @@ const COPY: Record<Role, { icon: LucideIcon; wordmark: string; signupPrompt: str
 export function LoginScreen({ role }: { role: Role }) {
   const [params] = useSearchParams();
   const email = params.get('email') ?? undefined;
+  const testAccount = params.get('as');
+  const autoSignIn = useAutoSignIn(role, testAccount);
   const copy = COPY[role];
   const Icon = copy.icon;
 
@@ -59,8 +63,17 @@ export function LoginScreen({ role }: { role: Role }) {
 
       <div className="flex flex-1 flex-col overflow-y-auto px-[22px] pt-[26px] pb-6">
         {infoMessage && <Banner message={infoMessage} variant="info" onDismiss={() => setInfoMessage(null)} />}
+        {autoSignIn.status === 'signing-in' && (
+          <p
+            data-testid="auto-sign-in"
+            className="mb-4 flex items-center gap-2 rounded-control bg-primary-50 px-3 py-3 text-[14px] font-semibold text-primary-700"
+          >
+            <Loader2 size={16} className="shrink-0 animate-spin" /> Signing in as {autoSignIn.email}…
+          </p>
+        )}
+        {autoSignIn.status === 'failed' && <Banner message={autoSignIn.message} variant="error" />}
 
-        <LoginForm role={role} initialEmail={email} />
+        <LoginForm role={role} initialEmail={testAccount ?? email} />
 
         <p className="mt-4 text-center text-[15px] text-neutral-500">
           {copy.signupPrompt}

@@ -42,3 +42,26 @@ export interface DriverLoginResult {
   access_token: string;
   driver: Driver;
 }
+
+/** One account from GET /api/v1/dev/test-accounts (go-ride-backend's config/test-accounts.yaml). */
+export interface TestAccount {
+  email: string;
+  first_name: string;
+  last_name: string;
+  /** Seeded and usable: a rider exists and is active; a driver can go online. */
+  ready: boolean;
+  vehicle?: {
+    plate_number: string;
+    model_name: string;
+    color: string;
+    seat_count: number;
+    category: 'normal' | 'luxury';
+  };
+}
+
+export interface TestAccounts {
+  /** Shared by every test account. */
+  password: string;
+  riders: TestAccount[];
+  drivers: TestAccount[];
+}
