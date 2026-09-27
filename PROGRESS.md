@@ -53,7 +53,7 @@ every working session and every phase.
 - [x] 2.7 Simulator shows driver status; smoke covers online → ping → offer (~150–250ms) → ack → accept
 - [x] Fix found on the way: duplicate-tab guard now defends during boot (`5ed6ef4`)
 
-<details><summary>SQL used for 2.1 (idempotent; re-run if drivers are recreated)</summary>
+<details><summary>SQL used for 2.1 (superseded by go-ride-backend's <code>make seed</code> since 2026-09-27)</summary>
 
 ```sql
 BEGIN;
