@@ -1,6 +1,6 @@
 import { Map, useMap } from '@vis.gl/react-google-maps';
 import { MousePointerClick } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 
 import type { GeoPoint } from '../../shared/location/location-store';
 import { ActorMarker } from './ActorMarker';
@@ -33,7 +33,7 @@ function FocusController({ focus }: { focus: GeoPoint | null }) {
   return null;
 }
 
-export function SimulatorMap({ tabs, selected, focus, isStale, onSelect, onMove }: SimulatorMapProps) {
+export const SimulatorMap = memo(function SimulatorMap({ tabs, selected, focus, isStale, onSelect, onMove }: SimulatorMapProps) {
   const [initialView] = useState(readMapView);
   const [found, setFound] = useState<FoundPlace | null>(null);
   const selectedMovable = selected && selected.locationSource === 'simulated' && !isStale(selected);
@@ -61,11 +61,11 @@ export function SimulatorMap({ tabs, selected, focus, isStale, onSelect, onMove 
           tab.location ? (
             <ActorMarker
               key={tab.tabId}
-              tab={{ ...tab, location: tab.location }}
+              tab={tab as RegisteredTab & { location: NonNullable<RegisteredTab['location']> }}
               selected={tab.tabId === selected?.tabId}
               stale={isStale(tab)}
-              onSelect={() => onSelect(tab.tabId)}
-              onMove={(lat, lng) => onMove(tab.tabId, { lat, lng })}
+              onSelect={onSelect}
+              onMove={onMove}
             />
           ) : null,
         )}
@@ -113,4 +113,4 @@ export function SimulatorMap({ tabs, selected, focus, isStale, onSelect, onMove 
       </div>
     </div>
   );
-}
+});

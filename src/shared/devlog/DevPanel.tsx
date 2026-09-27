@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 
 import { formatPoint, useLocationStore, type LocationSource } from '../location/location-store';
 import { useRealtimeStore } from '../realtime/use-realtime';
@@ -68,17 +68,10 @@ function formatRemaining(ms: number): string {
 export function DevPanel({ role }: { role: Role }) {
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [filter, setFilter] = useState<Filter>('all');
-  const [now, setNow] = useState(() => Date.now());
   const user = sessionStores[role]((s) => s.user);
-  const expiresAt = sessionStores[role]((s) => s.tokenExpiresAt);
   const wsState = useRealtimeStore((s) => s.wsState);
   const entries = useDevLogStore((s) => s.entries);
   const clear = useDevLogStore((s) => s.clear);
-
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   const toggle = () => {
     setCollapsed((value) => {
@@ -120,7 +113,9 @@ export function DevPanel({ role }: { role: Role }) {
         <dt className="text-neutral-500">User</dt>
         <dd className="truncate font-semibold">{user ? `${user.first_name} ${user.last_name} · ${user.email}` : 'signed out'}</dd>
         <dt className="text-neutral-500">Token</dt>
-        <dd>{expiresAt ? `expires in ${formatRemaining(expiresAt - now)}` : '—'}</dd>
+        <dd>
+          <TokenExpiry role={role} />
+        </dd>
         <dt className="text-neutral-500">Websocket</dt>
         <dd className="flex items-center gap-2">
           <span className={`h-2 w-2 rounded-full ${WS_DOT[wsState]}`} />
@@ -156,6 +151,17 @@ export function DevPanel({ role }: { role: Role }) {
       </ol>
     </aside>
   );
+}
+
+/** Ticks every second on its own, so the panel (and its log list) doesn't re-render with it. */
+function TokenExpiry({ role }: { role: Role }) {
+  const expiresAt = sessionStores[role]((s) => s.tokenExpiresAt);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+  return <>{expiresAt ? `expires in ${formatRemaining(expiresAt - now)}` : '—'}</>;
 }
 
 const SOURCES: { id: LocationSource; label: string }[] = [
@@ -197,10 +203,13 @@ function LocationRow() {
   );
 }
 
-function LogRow({ entry }: { entry: DevLogEntry }) {
+const TIME_FORMAT = new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+
+// Entries never change once logged, so a row only renders when it's new or toggled.
+const LogRow = memo(function LogRow({ entry }: { entry: DevLogEntry }) {
   const [open, setOpen] = useState(false);
   const hasData = entry.data !== undefined;
-  const time = new Date(entry.at).toLocaleTimeString([], { hour12: false });
+  const time = TIME_FORMAT.format(entry.at);
 
   return (
     <li className="border-b border-neutral-100">
@@ -223,4 +232,4 @@ function LogRow({ entry }: { entry: DevLogEntry }) {
       )}
     </li>
   );
-}
+});

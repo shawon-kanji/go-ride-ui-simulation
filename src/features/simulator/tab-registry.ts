@@ -16,6 +16,15 @@ export function actorLabel(tab: RegisteredTab): string {
   return `${tab.role ?? 'tab'} ${tab.tabId.slice(0, 4)}`;
 }
 
+/** Ids of tabs that haven't announced themselves for a while, as one comparable string. */
+export function staleKeyOf(tabs: Iterable<RegisteredTab>, now: number): string {
+  return [...tabs]
+    .filter((tab) => now - tab.lastSeen > STALE_AFTER_MS)
+    .map((tab) => tab.tabId)
+    .sort()
+    .join(',');
+}
+
 interface TabRegistryState {
   tabs: Record<string, RegisteredTab>;
 }

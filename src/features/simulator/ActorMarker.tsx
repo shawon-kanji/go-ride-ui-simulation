@@ -1,5 +1,6 @@
 import { AdvancedMarker } from '@vis.gl/react-google-maps';
 import { Car, Navigation, User } from 'lucide-react';
+import { memo } from 'react';
 
 import { actorLabel, type RegisteredTab } from './tab-registry';
 
@@ -15,11 +16,13 @@ interface ActorMarkerProps {
   tab: RegisteredTab & { location: NonNullable<RegisteredTab['location']> };
   selected: boolean;
   stale: boolean;
-  onSelect: () => void;
-  onMove: (lat: number, lng: number) => void;
+  onSelect: (tabId: string) => void;
+  onMove: (tabId: string, point: { lat: number; lng: number }) => void;
 }
 
-export function ActorMarker({ tab, selected, stale, onSelect, onMove }: ActorMarkerProps) {
+// Memoised: while a car drives, its tab re-announces 4× a second and only its own marker
+// needs to re-render. The registry keeps every other tab's object as it was.
+export const ActorMarker = memo(function ActorMarker({ tab, selected, stale, onSelect, onMove }: ActorMarkerProps) {
   const style = ROLE_STYLE[tab.role ?? 'rider'];
   const Icon = tab.locationSource === 'browser' ? Navigation : style.Icon;
   const movable = tab.locationSource === 'simulated' && !stale;
@@ -33,11 +36,11 @@ export function ActorMarker({ tab, selected, stale, onSelect, onMove }: ActorMar
       anchorLeft="-50%"
       anchorTop="-18px"
       title={`${tab.name ?? 'Signed out'} · ${tab.role} · ${tab.tabId.slice(0, 4)}`}
-      onClick={onSelect}
-      onDragStart={onSelect}
+      onClick={() => onSelect(tab.tabId)}
+      onDragStart={() => onSelect(tab.tabId)}
       onDragEnd={(e) => {
         const latLng = e.latLng;
-        if (latLng) onMove(latLng.lat(), latLng.lng());
+        if (latLng) onMove(tab.tabId, { lat: latLng.lat(), lng: latLng.lng() });
       }}
     >
       <div className={`flex flex-col items-center ${dimmed ? 'opacity-50' : ''}`}>
@@ -57,4 +60,4 @@ export function ActorMarker({ tab, selected, stale, onSelect, onMove }: ActorMar
       </div>
     </AdvancedMarker>
   );
-}
+});

@@ -1,4 +1,5 @@
 import { Car, Crosshair, Navigation, User } from 'lucide-react';
+import { memo } from 'react';
 
 import { formatPoint } from '../../shared/location/location-store';
 import type { WsState } from '../../shared/tab/types';
@@ -31,7 +32,7 @@ interface TabListProps {
   onLocate: (tab: RegisteredTab) => void;
 }
 
-export function TabList({ tabs, selectedId, isStale, onSelect, onLocate }: TabListProps) {
+export const TabList = memo(function TabList({ tabs, selectedId, isStale, onSelect, onLocate }: TabListProps) {
   const groups = [
     { title: 'Drivers', role: 'driver' as const, Icon: Car },
     { title: 'Riders', role: 'rider' as const, Icon: User },
@@ -56,80 +57,101 @@ export function TabList({ tabs, selectedId, isStale, onSelect, onLocate }: TabLi
               {title} · {members.length}
             </h2>
             <ul className="flex flex-col gap-1.5">
-              {members.map((tab) => {
-                const selected = tab.tabId === selectedId;
-                const stale = isStale(tab);
-                return (
-                  <li key={tab.tabId}>
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      aria-pressed={selected}
-                      data-testid={`tab-row-${tab.tabId}`}
-                      onClick={() => onSelect(selected ? null : tab.tabId)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') onSelect(selected ? null : tab.tabId);
-                      }}
-                      className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors ${selected ? 'border-neutral-900 bg-white shadow-sm' : 'border-transparent bg-white/60 hover:bg-white'} ${stale ? 'opacity-50' : ''}`}
-                    >
-                      <span
-                        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white ${role === 'driver' ? 'bg-[#4f46e5]' : 'bg-[#00a04a]'}`}
-                      >
-                        <Icon size={16} />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[14px] font-bold">
-                          {tab.name ?? <span className="font-semibold text-neutral-400">Signed out</span>}
-                        </p>
-                        <p className="truncate text-[12px] text-neutral-500">
-                          {tab.email ?? 'no session'} · <span className="font-mono">{tab.tabId.slice(0, 4)}</span>
-                        </p>
-                        {tab.activity && (
-                          <span
-                            data-testid="tab-activity"
-                            className={`mt-1 inline-block rounded-pill px-2 py-0.5 text-[11px] font-bold ${activityStyle(tab.activity)}`}
-                          >
-                            {tab.activity}
-                          </span>
-                        )}
-                        <p className="mt-1 flex items-center gap-1.5 whitespace-nowrap text-[12px] text-neutral-600">
-                          <span className={`h-1.5 w-1.5 rounded-full ${WS_DOT[tab.wsState]}`} />
-                          {stale ? 'stale' : `ws ${tab.wsState}`}
-                          <span className="text-neutral-300">·</span>
-                          {tab.locationSource === 'browser' && (
-                            <span className="inline-flex items-center gap-0.5 font-semibold text-sky-700">
-                              <Navigation size={10} /> GPS
-                            </span>
-                          )}
-                          {tab.location ? (
-                            <span className="truncate font-mono text-[11px]">{formatPoint(tab.location)}</span>
-                          ) : (
-                            <span className="font-semibold text-warning-600">not placed</span>
-                          )}
-                        </p>
-                      </div>
-                      {tab.location && (
-                        <button
-                          type="button"
-                          aria-label="Show on map"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onLocate(tab);
-                          }}
-                          className="-mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
-                        >
-                          <Crosshair size={16} />
-                        </button>
-                      )}
-                    </div>
-                    {role === 'driver' && tab.driverTrip && <PlaybackCard tab={tab} />}
-                  </li>
-                );
-              })}
+              {members.map((tab) => (
+                <TabRow
+                  key={tab.tabId}
+                  tab={tab}
+                  Icon={Icon}
+                  selected={tab.tabId === selectedId}
+                  stale={isStale(tab)}
+                  onSelect={onSelect}
+                  onLocate={onLocate}
+                />
+              ))}
             </ul>
           </section>
         );
       })}
     </div>
   );
+});
+
+interface TabRowProps {
+  tab: RegisteredTab;
+  Icon: typeof Car;
+  selected: boolean;
+  stale: boolean;
+  onSelect: (tabId: string | null) => void;
+  onLocate: (tab: RegisteredTab) => void;
 }
+
+// Memoised: only the row whose tab re-announced (or whose selection/staleness changed) re-renders.
+const TabRow = memo(function TabRow({ tab, Icon, selected, stale, onSelect, onLocate }: TabRowProps) {
+  const role = tab.role;
+  return (
+    <li>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-pressed={selected}
+        data-testid={`tab-row-${tab.tabId}`}
+        onClick={() => onSelect(selected ? null : tab.tabId)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') onSelect(selected ? null : tab.tabId);
+        }}
+        className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors ${selected ? 'border-neutral-900 bg-white shadow-sm' : 'border-transparent bg-white/60 hover:bg-white'} ${stale ? 'opacity-50' : ''}`}
+      >
+        <span
+          className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white ${role === 'driver' ? 'bg-[#4f46e5]' : 'bg-[#00a04a]'}`}
+        >
+          <Icon size={16} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[14px] font-bold">
+            {tab.name ?? <span className="font-semibold text-neutral-400">Signed out</span>}
+          </p>
+          <p className="truncate text-[12px] text-neutral-500">
+            {tab.email ?? 'no session'} · <span className="font-mono">{tab.tabId.slice(0, 4)}</span>
+          </p>
+          {tab.activity && (
+            <span
+              data-testid="tab-activity"
+              className={`mt-1 inline-block rounded-pill px-2 py-0.5 text-[11px] font-bold ${activityStyle(tab.activity)}`}
+            >
+              {tab.activity}
+            </span>
+          )}
+          <p className="mt-1 flex items-center gap-1.5 whitespace-nowrap text-[12px] text-neutral-600">
+            <span className={`h-1.5 w-1.5 rounded-full ${WS_DOT[tab.wsState]}`} />
+            {stale ? 'stale' : `ws ${tab.wsState}`}
+            <span className="text-neutral-300">·</span>
+            {tab.locationSource === 'browser' && (
+              <span className="inline-flex items-center gap-0.5 font-semibold text-sky-700">
+                <Navigation size={10} /> GPS
+              </span>
+            )}
+            {tab.location ? (
+              <span className="truncate font-mono text-[11px]">{formatPoint(tab.location)}</span>
+            ) : (
+              <span className="font-semibold text-warning-600">not placed</span>
+            )}
+          </p>
+        </div>
+        {tab.location && (
+          <button
+            type="button"
+            aria-label="Show on map"
+            onClick={(e) => {
+              e.stopPropagation();
+              onLocate(tab);
+            }}
+            className="-mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+          >
+            <Crosshair size={16} />
+          </button>
+        )}
+      </div>
+      {role === 'driver' && tab.driverTrip && <PlaybackCard tab={tab} />}
+    </li>
+  );
+});

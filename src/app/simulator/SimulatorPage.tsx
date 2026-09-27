@@ -8,9 +8,9 @@ import { usePlaybackSupervisor } from '../../features/simulator/drive/use-playba
 import { SimulatorMap } from '../../features/simulator/SimulatorMap';
 import { TabList } from '../../features/simulator/TabList';
 import {
-  STALE_AFTER_MS,
   useTabRegistry,
   useTabRegistryFeed,
+  staleKeyOf,
   type RegisteredTab,
 } from '../../features/simulator/tab-registry';
 import type { GeoPoint } from '../../shared/location/location-store';
@@ -19,6 +19,8 @@ import { ErrorBoundary } from '../../shared/ui/ErrorBoundary';
 // Full-screen simulator: open tabs on the left, the map on the right. Select a tab and
 // click the map (or drag its marker) to move that tab's simulated GPS. A driver on a trip
 // can be driven along real roads (its playback card, or auto-drive).
+// Phone tabs open with `noopener`: a tab opened with an opener shares the simulator's
+// process and main thread, so its rendering would stall the simulator's map.
 
 const HAS_MAPS_KEY = Boolean(import.meta.env.VITE_GOOGLE_MAPS_API_KEY);
 
@@ -31,11 +33,12 @@ export function SimulatorPage() {
   const tabsById = useTabRegistry((s) => s.tabs);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focus, setFocus] = useState<GeoPoint | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [staleKey, setStaleKey] = useState('');
 
   useEffect(() => {
     document.title = 'Go Ride · Simulator';
-    const interval = setInterval(() => setNow(Date.now()), 1000);
+    // Checked every second, but the page only re-renders when the set of stale tabs changes.
+    const interval = setInterval(() => setStaleKey(staleKeyOf(Object.values(useTabRegistry.getState().tabs), Date.now())), 1000);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setSelectedId(null);
     };
@@ -54,7 +57,11 @@ export function SimulatorPage() {
     [tabsById],
   );
   const selected = selectedId ? (tabsById[selectedId] ?? null) : null;
-  const isStale = useCallback((tab: RegisteredTab) => now - tab.lastSeen > STALE_AFTER_MS, [now]);
+  const isStale = useCallback((tab: RegisteredTab) => staleKey.split(',').includes(tab.tabId), [staleKey]);
+  const onLocate = useCallback((tab: RegisteredTab) => {
+    setSelectedId(tab.tabId);
+    if (tab.location) setFocus({ ...tab.location });
+  }, []);
 
   return (
     <div className="flex h-dvh overflow-hidden">
@@ -67,14 +74,14 @@ export function SimulatorPage() {
           <div className="mt-3 flex gap-2">
             <button
               type="button"
-              onClick={() => window.open('/user', '_blank')}
+              onClick={() => window.open('/user', '_blank', 'noopener')}
               className="flex flex-1 items-center justify-center gap-2 rounded-control bg-[#00a04a] px-3 py-2 text-[13px] font-bold text-white hover:bg-[#008a3f]"
             >
               <Car size={16} /> Open rider tab
             </button>
             <button
               type="button"
-              onClick={() => window.open('/driver', '_blank')}
+              onClick={() => window.open('/driver', '_blank', 'noopener')}
               className="flex flex-1 items-center justify-center gap-2 rounded-control bg-primary-500 px-3 py-2 text-[13px] font-bold text-white hover:bg-primary-600"
             >
               <Truck size={16} /> Open driver tab
@@ -102,10 +109,7 @@ export function SimulatorPage() {
             selectedId={selectedId}
             isStale={isStale}
             onSelect={setSelectedId}
-            onLocate={(tab) => {
-              setSelectedId(tab.tabId);
-              if (tab.location) setFocus({ ...tab.location });
-            }}
+            onLocate={onLocate}
           />
         </div>
       </aside>
