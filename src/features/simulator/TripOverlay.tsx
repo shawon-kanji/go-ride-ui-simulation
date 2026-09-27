@@ -1,13 +1,15 @@
 import { AdvancedMarker, Polyline } from '@vis.gl/react-google-maps';
 import { Fragment } from 'react';
 
+import { usePlaybackStore } from './drive/playback-store';
 import type { RegisteredTab } from './tab-registry';
 
 // Each rider's live trip on the simulator map: pickup (blue) and drop-off (red) pins,
 // a faint pickup → drop-off line, and a link from the assigned driver to where they're
 // heading — the pickup, then (once the trip starts) the drop-off.
 // The driver end uses that driver's own tab when it's open here (its true simulated
-// position), else the last position the rider was told about.
+// position), else the last position the rider was told about. While the simulator drives
+// that driver along a route (RouteOverlay), the route replaces the link.
 
 const COLORS = { pickup: '#2563eb', dropoff: '#f4523b', link: '#00a04a', route: '#101614' } as const;
 
@@ -30,6 +32,7 @@ function Pin({ position, color, title }: { position: google.maps.LatLngLiteral; 
 
 export function TripOverlay({ tabs }: { tabs: RegisteredTab[] }) {
   const riders = tabs.filter((tab) => tab.role === 'rider' && tab.trip);
+  const playbacks = usePlaybackStore((s) => s.playbacks);
 
   return (
     <>
@@ -40,6 +43,7 @@ export function TripOverlay({ tabs }: { tabs: RegisteredTab[] }) {
         // Before pickup the rider only hears driver_location; after it, only the driver's tab knows.
         const driverAt = driverTab?.location ?? (trip.phase === 'assigned' ? trip.driverFix : null);
         const linkTo = trip.phase === 'assigned' ? trip.pickup : trip.dropoff;
+        const driven = driverTab && playbacks[driverTab.tabId]?.route.requestId === trip.requestId;
         return (
           <Fragment key={rider.tabId}>
             <Polyline
@@ -49,7 +53,7 @@ export function TripOverlay({ tabs }: { tabs: RegisteredTab[] }) {
               strokeWeight={3}
               geodesic
             />
-            {driverAt && (
+            {driverAt && !driven && (
               <Polyline
                 path={[driverAt, linkTo]}
                 strokeOpacity={0}

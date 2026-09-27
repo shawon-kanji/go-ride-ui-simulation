@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
 import { moveTab } from '../../features/simulator/commands';
+import { useAutoDrive, useDriveAutomation } from '../../features/simulator/drive/use-drive-automation';
+import { usePlaybackSupervisor } from '../../features/simulator/drive/use-playback-supervisor';
 import { SimulatorMap } from '../../features/simulator/SimulatorMap';
 import { TabList } from '../../features/simulator/TabList';
 import {
@@ -15,12 +17,17 @@ import type { GeoPoint } from '../../shared/location/location-store';
 import { ErrorBoundary } from '../../shared/ui/ErrorBoundary';
 
 // Full-screen simulator: open tabs on the left, the map on the right. Select a tab and
-// click the map (or drag its marker) to move that tab's simulated GPS.
+// click the map (or drag its marker) to move that tab's simulated GPS. A driver on a trip
+// can be driven along real roads (its playback card, or auto-drive).
 
 const HAS_MAPS_KEY = Boolean(import.meta.env.VITE_GOOGLE_MAPS_API_KEY);
 
 export function SimulatorPage() {
   useTabRegistryFeed();
+  usePlaybackSupervisor();
+  useDriveAutomation();
+  const autoDrive = useAutoDrive((s) => s.on);
+  const setAutoDrive = useAutoDrive((s) => s.setOn);
   const tabsById = useTabRegistry((s) => s.tabs);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focus, setFocus] = useState<GeoPoint | null>(null);
@@ -73,6 +80,21 @@ export function SimulatorPage() {
               <Truck size={16} /> Open driver tab
             </button>
           </div>
+          <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-control bg-white px-3 py-2 text-[13px] ring-1 ring-neutral-200">
+            <input
+              type="checkbox"
+              data-testid="auto-drive"
+              checked={autoDrive}
+              onChange={(e) => setAutoDrive(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-[#4f46e5]"
+            />
+            <span>
+              <span className="font-bold text-neutral-900">Auto-drive</span>
+              <span className="block text-neutral-500">
+                Drivers drive to the pickup when they accept, and to the drop-off once the trip starts.
+              </span>
+            </span>
+          </label>
         </div>
         <div className="flex-1 overflow-y-auto">
           <TabList

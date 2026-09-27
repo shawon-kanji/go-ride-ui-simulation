@@ -6,6 +6,7 @@ import type { GeoPoint } from '../../shared/location/location-store';
 import { ActorMarker } from './ActorMarker';
 import { readMapView, saveMapView } from './map-view';
 import { FoundPlaceMarker, PlaceSearch, type FoundPlace } from './PlaceSearch';
+import { RouteOverlay } from './drive/RouteOverlay';
 import { TripOverlay } from './TripOverlay';
 import { actorLabel, type RegisteredTab } from './tab-registry';
 
@@ -69,6 +70,7 @@ export function SimulatorMap({ tabs, selected, focus, isStale, onSelect, onMove 
           ) : null,
         )}
         <TripOverlay tabs={tabs} />
+        <RouteOverlay />
         {found && (
           <FoundPlaceMarker
             found={found}

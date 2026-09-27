@@ -1,4 +1,5 @@
 import type { NavRoute } from '../tab/types';
+import type { Point } from './geometry';
 import { decodePolyline } from './polyline';
 import { buildProfile, type RoutePosition, type RouteProfile } from './profile';
 
@@ -26,4 +27,15 @@ export function profileTimeAt(route: Pick<NavRoute, 'anchor' | 'speedFactor' | '
 
 export function positionOnRoute(route: NavRoute, now: number): RoutePosition {
   return profileFor(route).positionAt(profileTimeAt(route, now));
+}
+
+/** The route cut at `metres`: the part driven and the part left, both including the cut point. */
+export function splitRoute(profile: RouteProfile, metres: number): { travelled: Point[]; remaining: Point[] } {
+  const { points, cumMetres } = profile;
+  if (points.length < 2) return { travelled: points, remaining: points };
+  const at = profile.pointAtMetres(metres);
+  const cut = { lat: at.lat, lng: at.lng };
+  let i = 0;
+  while (i < points.length && cumMetres[i] <= metres) i++;
+  return { travelled: [...points.slice(0, i), cut], remaining: [cut, ...points.slice(i)] };
 }

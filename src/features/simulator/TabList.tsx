@@ -2,6 +2,7 @@ import { Car, Crosshair, Navigation, User } from 'lucide-react';
 
 import { formatPoint } from '../../shared/location/location-store';
 import type { WsState } from '../../shared/tab/types';
+import { PlaybackCard } from './drive/PlaybackCard';
 import type { RegisteredTab } from './tab-registry';
 
 // Sidebar list of every open tab, grouped by role. Selecting a tab arms the map:
@@ -121,6 +122,7 @@ export function TabList({ tabs, selectedId, isStale, onSelect, onLocate }: TabLi
                         </button>
                       )}
                     </div>
+                    {role === 'driver' && tab.driverTrip && <PlaybackCard tab={tab} />}
                   </li>
                 );
               })}

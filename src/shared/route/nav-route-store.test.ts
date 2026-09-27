@@ -1,6 +1,6 @@
 import type { NavRoute } from '../tab/types';
 import { encodePolyline } from './polyline';
-import { profileFor, profileTimeAt } from './nav-route';
+import { profileFor, profileTimeAt, splitRoute } from './nav-route';
 import { createNavRouteStore, keepMatching, reduceNavRoutes } from './nav-route-store';
 import { pathOf } from './test-paths';
 
@@ -80,5 +80,26 @@ describe('profileTimeAt', () => {
   it('builds a route’s profile once', () => {
     const moved = route({ anchor: { atMs: 0, profileT: 5 }, speedFactor: 10 });
     expect(profileFor(route())).toBe(profileFor(moved));
+  });
+});
+
+describe('splitRoute', () => {
+  it('cuts the route where the car is', () => {
+    const profile = profileFor(route());
+    const { travelled, remaining } = splitRoute(profile, 123);
+    expect(travelled[0]).toEqual(profile.points[0]);
+    expect(remaining.at(-1)).toEqual(profile.points.at(-1));
+    expect(travelled.at(-1)).toEqual(remaining[0]);
+    expect(travelled.length + remaining.length).toBe(profile.points.length + 2);
+  });
+
+  it('handles both ends', () => {
+    const profile = profileFor(route());
+    const atStart = splitRoute(profile, 0);
+    expect(atStart.remaining[0]).toEqual(profile.points[0]);
+    expect(atStart.remaining.at(-1)).toEqual(profile.points.at(-1));
+    const atEnd = splitRoute(profile, profile.totalMetres);
+    expect(atEnd.travelled.at(-1)).toEqual(profile.points.at(-1));
+    expect(atEnd.remaining).toHaveLength(1);
   });
 });

@@ -460,7 +460,9 @@ Every speed change, pause, resume or reload re-anchors and re-sends `nav-route`.
 - [x] 2 Protocol, presence additions, nav-route store, quiet playback logging + tests
 - [x] 3 Spike: Routes JS library response shape — works as planned (see Gotchas)
 - [x] 4 Playback controller (route sources, worker ticker, playback store, persistence) + tests
-- [ ] 5 Simulator drive UI, auto-drive, drive-request/ack — **checkpoint:** pings on the route (SQL)
+- [x] 5 Simulator drive UI, auto-drive, drive-request/ack — **checkpoint passed 2026-09-27:** auto-drive at ×10,
+      2.7 km road route for 850 m straight, 7 stored pings all on the route (max 0.0 m), same route in both tabs,
+      car stops 43 m from the pickup pin (nearest road point)
 - [ ] 6 D09 shared route, route ETA, rotating car, Navigate
 - [ ] 7 R05 route + tween + route ETA; R06 car on the booked route
 - [ ] 8 Smoke test additions
@@ -504,6 +506,9 @@ inspector.
 | 2026-09-26 | Simulator place search calls Google Places (New) from the browser key | Simulator has no login, so no backend places proxy; user chose adding Places to the key over borrowing a tab's token |
 
 ## Gotchas learned
+
+- **`driver_locations` is one row per driver** (unique `driver_id`, upserted), not a history. To check every ping,
+  poll the row (≤2 Hz) during the drive — pings are ≥10s apart, so each change is one ping.
 
 - **Routes JS library** (`google.maps.importLibrary('routes')` → `Route.computeRoutes`, checked 2026-09-27 in
   Firefox, ~200ms): `route.path` is an array of `LatLngAltitude` (numeric `lat`/`lng`), **not** an encoded string;
