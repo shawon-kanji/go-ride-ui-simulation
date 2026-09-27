@@ -4,7 +4,7 @@ The working log for this repo. [PLAN.md](PLAN.md) is the design; this file track
 what's next at task level, and what was learned along the way. Update it at the end of
 every working session and every phase.
 
-**Last updated:** 2026-09-27 · **Current phase:** 5b in progress (test accounts + quick setup; monitoring deferred)
+**Last updated:** 2026-09-27 · **Current phase:** 5b done 2026-09-27 (monitoring deferred); next: Phase 6 or deferred monitoring
 
 ---
 
@@ -18,7 +18,7 @@ every working session and every phase.
 | 3 Rider booking happy path | ✅ done 2026-09-26 | `94d6ca1`…`d63c85e` | Unit tests (100), `smoke:firefox` 40/40 (offers to 2 drivers in ~80–110ms, driver move → rider map in <5s) |
 | 4 Trip completion + cancellation | ✅ done 2026-09-26 | `356510e`…`b38e57c` | Unit tests (122), `smoke:firefox` 58/58 (full lifecycle, redispatch, rider cancel mid-trip) |
 | 5 Realistic driving (route playback) | ✅ done 2026-09-27 | `ac2b40c`…`9adf579` | Unit tests (184), `smoke:firefox` 75/75 (both legs driven, every stored ping ≤25 m from the route — measured 0.0 m) |
-| 5b Simulator tools (setup, layouts, timeline, inspector) | ⏳ next | — | — |
+| 5b Test accounts + quick setup + layouts | ✅ done 2026-09-27 | `f87beaf`…(this commit); go-ride-backend `398730a` (branch `feat/dev-test-accounts`) | Unit tests (199) + backend `go test`, `smoke:firefox` 81/81 |
 | 6 Remaining screens | ☐ | — | — |
 
 ### Phase 0 — Foundation ✅
@@ -476,7 +476,7 @@ Every speed change, pause, resume or reload re-anchors and re-sends `nav-route`.
 - D09, R05, R06 draw the shared route; D09 Navigate asks the simulator to drive
 - Not in the smoke test: "×10 finishes proportionally faster" (covered by `playback-store.test.ts` instead)
 
-## Next: Phase 5b — Test accounts and quick setup (re-planned 2026-09-27)
+### Phase 5b — Test accounts and quick setup ✅ (2026-09-27)
 
 **Scope (user, 2026-09-27):** test accounts from one YAML file in go-ride-backend, served by a dev-only API and
 seeded by a script; auto sign-in for riders and drivers; opening several rider/driver tabs at once; scatter and go
@@ -531,7 +531,7 @@ online; layouts. **Monitoring (merged timeline, trip inspector) is deferred** �
 - [x] 5b.3 Quick setup: counts, open N riders/drivers, pop-up-blocker detection
 - [x] 5b.4 Scatter + `set-online`
 - [x] 5b.5 Layouts: save / load / delete / export / import, *Open* for missing accounts
-- [ ] 5b.6 Smoke: open 3 drivers + 1 rider via quick setup (smoke allows pop-ups), scatter, online, book → 3 offers;
+- [x] 5b.6 Smoke: open 3 drivers + 1 rider via quick setup (smoke allows pop-ups), scatter, online, book → 3 offers;
       a layout round trip. Commit per sub-area, update this file.
 
 ### Deferred: monitoring (merged timeline, trip inspector)
@@ -586,6 +586,15 @@ only the visible rows.
 | 2026-09-26 | Simulator place search calls Google Places (New) from the browser key | Simulator has no login, so no backend places proxy; user chose adding Places to the key over borrowing a tab's token |
 
 ## Gotchas learned
+
+- **Consumers die on a Kafka blip:** `dispatch-consumer` exited with `fetch kafka message: EOF` (2026-09-27 18:15),
+  and bookings then got no offers. Check `logs/dispatch-consumer.log` and restart that one service.
+- **A driver who just went online isn't dispatchable until its first ping is stored** (dispatch requires
+  `recorded_at` < 300s old). Tests wait for fresh `driver_locations` rows before booking.
+- **Case-insensitive macOS file system:** `Layouts.tsx` next to `layouts.ts` breaks TypeScript imports. Use distinct
+  names (`LayoutsCard.tsx`).
+- **Puppeteer + `<input type=number>` in Firefox:** triple-click doesn't select the value; clear it with Backspace
+  before typing.
 
 - **`window.open(url, '_blank')` puts the new tab on the opener's main thread** (Chrome keeps same-site tabs with
   an opener in one process). Phone tabs opened from the simulator froze its map for seconds at a time. Always pass
@@ -654,12 +663,16 @@ only the visible rows.
 
 ## Environment checkpoint
 
+- **Test accounts** (since Phase 5b): defined in `go-ride-backend/config/test-accounts.yaml` (5 riders, 8 drivers,
+  password `password123`). `make seed` in go-ride-backend creates or resets them. The backend's local `.env` has
+  `DEV_TOOLS_ENABLED=true` (gitignored), which enables `GET /api/v1/dev/test-accounts` for quick setup and auto
+  sign-in. Without it, quick setup says how to turn it on.
+
 - Web app: `npm run dev` → http://localhost:5173
 - Go stack: `scripts/run-all.sh` (workspace root) — 8 processes incl. `dispatch-consumer`
   and `location-consumers`; logs in `../logs/`. Infra: `go-ride-infra/local` docker compose.
   If Kafka/Postgres go down, the consumers exit — restart the stack.
-- Test accounts (password `password123`): riders `sim.rider1|2@goride.test`, drivers
-  `sim.driver1|2|3@goride.test` — drivers are KYC-approved with active vehicles (Phase 2.1).
+- Test accounts: see the first bullet (YAML + `make seed`); `sim.rider1–5`, `sim.driver1–8`.
 - Smoke test resets drivers 1–2 offline and cancels rider1's active trip before and after it runs.
 - cab-request-handler prices in MYR only because of its local `.env` (see Phase 3 SQL block) — a fresh checkout
   falls back to `DEFAULT`/USD.

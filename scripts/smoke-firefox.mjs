@@ -18,7 +18,9 @@
 // pickup (every stored ping on the route, D09 and R05 on the same route, the rider's ETA
 // counting down to "Arriving now"); pause holds the car; a manual move stops the drive
 // and un-shares the route; Navigate restarts it; after the PIN it drives the booked route
-// to the drop-off.
+// to the drop-off. Phase 5b: quick setup opens three more drivers that sign themselves in
+// (test accounts from go-ride-backend, DEV_TOOLS_ENABLED=true), scatter + online, a booking
+// reaches all three, and a saved layout puts them back after they're moved.
 // Needs the Go stack and the go-ride-postgres container. Screenshots go to SMOKE_OUT
 // (default ./test-results/smoke).
 
@@ -216,6 +218,29 @@ function metresOffPath(point, path) {
   return best;
 }
 
+/** Straight-line metres between two points. */
+function metresBetween(a, b) {
+  const k = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * k;
+  const dLng = (b.lng - a.lng) * k;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * k) * Math.cos(b.lat * k) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6_371_008.8 * Math.asin(Math.sqrt(h));
+}
+
+const simulatedFix = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem('goride:location') ?? '{}').simulated ?? null);
+
+/** Pages that appeared since `before` (tabs the simulator opened with window.open). */
+async function newPages(browser, before, count, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  let found = [];
+  while (Date.now() < deadline) {
+    found = (await browser.pages()).filter((p) => !before.has(p));
+    if (found.length >= count) break;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  return found;
+}
+
 /** The routes a tab holds from the simulator (nav-route), per leg. */
 const navRoutes = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem('goride:nav-routes') ?? 'null')?.routes ?? {});
 
@@ -361,6 +386,7 @@ try {
   //     database. Phase 3: driver 2 goes online nearby too, rider 1 books through the
   //     rider screens, both drivers get the offer, driver 1 wins.
   let requestId = null;
+  let quickSetupEmails = [];
   try {
     const driverId = await d1.evaluate(() => JSON.parse(sessionStorage.getItem('goride:session:driver')).user.id);
     await d1.bringToFront();
@@ -754,15 +780,103 @@ try {
     );
     check('the finished trip’s route is cleared in the driver tab', Object.keys(await navRoutes(d2)).length === 0);
     await (await d2.waitForSelector(buttonXPath('Back to map'))).click();
+    // Rate the trip so the rider is back on R01 for the next booking.
     await r1.bringToFront();
-    await (await r1.waitForSelector(buttonXPath('Submit rating'), { timeout: 10_000 }).catch(() => null))?.click();
+    await r1.waitForSelector('[data-testid="trip-complete"]', { timeout: 10_000 });
+    await r1.click('[role=radiogroup][aria-label="Rating"] [aria-label="5 stars"]');
+    await (await r1.waitForSelector(buttonXPath('Submit rating'))).click();
+    await r1.waitForSelector('[data-testid="suggested-place"]', { timeout: 10_000 });
+
+    // 6e. Phase 5b: quick setup, scatter + online, and a layout round trip.
+    await sim5.bringToFront();
+    const freeDrivers = () => sim5.$eval('[data-testid="free-drivers"]', (el) => Number.parseInt(el.textContent, 10));
+    await sim5.waitForSelector('[data-testid="free-drivers"]', { timeout: 10_000 });
+    const freeBefore = await freeDrivers();
+    const pagesBefore = new Set(await browser.pages());
+    await sim5.focus('input[aria-label="How many drivers to open"]');
+    for (let i = 0; i < 3; i++) await sim5.keyboard.press('Backspace');
+    await sim5.keyboard.type('3');
+    await sim5.click('[data-testid="open-drivers"]');
+    const fleet = await newPages(browser, pagesBefore, 3);
+    quickSetupEmails = await Promise.all(
+      fleet.map(async (page) => {
+        await page.waitForFunction((home) => document.body.textContent.includes(home), { timeout: 20_000, polling: 300 }, DRIVER_HOME);
+        return page.evaluate(() => JSON.parse(sessionStorage.getItem('goride:session:driver')).user.email);
+      }),
+    );
+    check('quick setup opens 3 driver tabs that sign themselves in', new Set(quickSetupEmails).size === 3, quickSetupEmails.join(', '));
+    check('the free driver count drops by 3', (await freeDrivers()) === freeBefore - 3, `${freeBefore} → ${await freeDrivers()}`);
+
+    // Centre the map on the rider, scatter, go online.
+    const riderAt = await simulatedFix(r1);
+    await sim5.bringToFront();
+    await sim5.click(`[data-testid="tab-row-${await tabId(r1)}"] button[aria-label="Show on map"]`);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await sim5.click('[data-testid="scatter-drivers"]');
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const scattered = await Promise.all(fleet.map(simulatedFix));
+    const farthest = Math.max(...scattered.map((p) => (p ? metresBetween(p, riderAt) : Infinity)));
+    check('scatter places them around the rider', farthest <= 1_600, `farthest ${Math.round(farthest)} m`);
+    await sim5.click('[data-testid="drivers-online"]');
+    const fleetSummary = () => sim5.$eval('[data-testid="driver-fleet-summary"]', (el) => el.textContent).catch(() => '');
+    await sim5.waitForFunction(() => /went online/.test(document.querySelector('[data-testid="driver-fleet-summary"]')?.textContent ?? ''), { timeout: 15_000, polling: 300 });
+    const inList = quickSetupEmails.map((e) => `'${e}'`).join(',');
+    const onlineCount = sql(`select count(*) from drivers where is_online and email in (${inList})`);
+    check('Online takes the quick-setup drivers online', onlineCount === '3', await fleetSummary());
+    // Dispatch only matches drivers whose stored location is fresh; a driver's first ping after
+    // going online can land a second after a booking made straight away.
+    await pollSql(
+      `select count(*) from driver_locations l join drivers d on d.id = l.driver_id where d.email in (${inList}) and l.recorded_at > now() - interval '20 seconds'`,
+      (value) => value === '3',
+      20_000,
+    );
+
+    // A booking reaches all three.
+    await bookFromR01(r1, 1);
+    requestId = (await riderTrip(r1))?.requestId ?? null;
+    const offered = await Promise.all(
+      fleet.map((page) =>
+        page
+          .waitForFunction(() => !!document.querySelector('[data-testid="offer-card"]'), { timeout: 30_000, polling: 300 })
+          .then(() => true, () => false),
+      ),
+    );
+    check('a booking offers the trip to all three', offered.every(Boolean), offered.join(', '));
+    await api(`/api/v1/cab/request-cab/${requestId}/cancel`, {
+      method: 'POST',
+      token: await apiLogin('rider', ACCOUNTS.rider1),
+      body: { reason: 'other', note: 'smoke test cleanup' },
+    });
+    requestId = null;
+
+    // Save a layout, scatter them elsewhere, load it back.
+    await sim5.bringToFront();
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    const savedAt = await Promise.all(fleet.map(simulatedFix));
+    await sim5.type('input[aria-label="Layout name"]', 'smoke scene');
+    await sim5.click('[data-testid="layout-save"]');
+    await sim5.select('select[aria-label="Scatter radius"]', '3000');
+    await sim5.click('[data-testid="scatter-drivers"]');
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const movedAway = await Promise.all(fleet.map(simulatedFix));
+    await (await sim5.waitForSelector('xpath/.//li[@data-testid="layout-row"][contains(., "smoke scene")]//button[normalize-space()="Load"]')).click();
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    const restored = await Promise.all(fleet.map(simulatedFix));
+    const back = restored.every((p, i) => p && Math.abs(p.lat - savedAt[i].lat) < 1e-9 && Math.abs(p.lng - savedAt[i].lng) < 1e-9);
+    const hadMoved = movedAway.some((p, i) => p && (p.lat !== savedAt[i].lat || p.lng !== savedAt[i].lng));
+    check('loading a layout puts the drivers back', hadMoved && back, await sim5.$eval('[data-testid="layout-message"]', (el) => el.textContent).catch(() => ''));
+    await sim5.screenshot({ path: `${OUT}/27-simulator-quick-setup.png` });
+
+    await sim5.click('[data-testid="drivers-offline"]');
+    await sim5.waitForFunction(() => /went offline/.test(document.querySelector('[data-testid="driver-fleet-summary"]')?.textContent ?? ''), { timeout: 15_000, polling: 300 });
+    for (const page of fleet) await page.close();
   } finally {
     // Cancel as the rider if the run stopped half way, then take both drivers offline.
     if (requestId) {
       const riderToken = await apiLogin('rider', ACCOUNTS.rider1);
       await api(`/api/v1/cab/request-cab/${requestId}/cancel`, { method: 'POST', token: riderToken, body: { reason: 'other', note: 'smoke test cleanup' } });
     }
-    for (const email of [ACCOUNTS.driver1, ACCOUNTS.driver2]) {
+    for (const email of [ACCOUNTS.driver1, ACCOUNTS.driver2, ...quickSetupEmails]) {
       const driverToken = await apiLogin('driver', email);
       await api('/api/v1/driver/online', { method: 'PATCH', body: { is_online: false }, token: driverToken });
     }
