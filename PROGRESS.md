@@ -523,6 +523,12 @@ inspector. Not planned at task level yet: start with a short plan, as for Phase 
 
 ## Gotchas learned
 
+- **`window.open(url, '_blank')` puts the new tab on the opener's main thread** (Chrome keeps same-site tabs with
+  an opener in one process). Phone tabs opened from the simulator froze its map for seconds at a time. Always pass
+  `'noopener'`; tabs opened before 2026-09-27 (`8d2846e`) need reopening.
+- **Profiling:** a CDP CPU profile attached to one page also samples any tab sharing its thread, which is how the
+  above showed up. Attribute `jsxDEV`/`createElement` time to components by walking up to the first `/src/` frame.
+
 - **Firefox doesn't run `requestAnimationFrame` in background tabs**, and puppeteer's `waitForFunction` /
   `waitForSelector` poll on it by default — a wait on a background page stalls for 20–40s. Pass `polling: 500` or
   bring the page to the front.
