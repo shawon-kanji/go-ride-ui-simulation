@@ -4,14 +4,18 @@ import { useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 
 import { distanceKm, formatMoney } from '../../../shared/lib/format';
+import { useNow } from '../../../shared/lib/use-now';
 import { useLocationStore } from '../../../shared/location/location-store';
 import { PIN_COLORS } from '../../../shared/map/map-colors';
 import { AppMap, CarMarker, FitBounds, PlaceDot } from '../../../shared/map/map-pieces';
 import { usePlaceLabel } from '../../../shared/places/places';
+import { routeBounds, routeProgress } from '../../../shared/route/nav-route';
+import { useNavRoute } from '../../../shared/route/nav-route-store';
 import { Button } from '../../../shared/ui/Button';
 import { CancelTripSheet } from '../trip/CancelTripSheet';
 import type { DriverTrip } from '../trip/trip-model';
 import { dispatchDriverTrip, useDriverTripStore } from '../trip/trip-store';
+import { useDriveRequest } from '../trip/use-drive-request';
 import {
   tripActionError,
   useCollectPaymentMutation,
@@ -22,9 +26,12 @@ import {
 // D09 Trip & cash collection. The design draws the on-trip state; heading to the
 // pickup (with start-PIN entry) and the ends of a trip are this app's additions. The
 // server only allows start (PIN) → end → collect-payment, so "Cash collected" unlocks
-// once the trip has ended.
+// once the trip has ended. When the simulator drives this tab along a route (nav-route),
+// the map shows it — driven part grey, the rest indigo — and the ETA comes from it;
+// otherwise a straight line at city speed. Navigate asks the simulator to drive.
 
 const CITY_SPEED_KMH = 25;
+const ARRIVED_WITHIN_M = 50;
 const SHEET_HEIGHT = 400;
 
 const clock = (ms: number | undefined) =>
@@ -185,27 +192,49 @@ function ActiveTrip({ trip }: { trip: DriverTrip }) {
   const [cancelOpen, setCancelOpen] = useState(false);
   const toPickup = trip.phase === 'to_pickup';
   const target = toPickup ? trip.pickup : trip.dropoff;
-  const km = position ? distanceKm(position, target) : null;
-  const minutes = km !== null ? Math.max(1, Math.round((km / CITY_SPEED_KMH) * 60)) : null;
+  const route = useNavRoute(toPickup ? 'pickup' : 'dropoff');
+  const now = useNow(1_000);
+  const progress = route && position ? routeProgress(route, position, now) : null;
+  const drive = useDriveRequest();
+
+  let minutes: number | null = null;
+  if (progress) minutes = Math.max(1, Math.round(progress.remainingSeconds / 60));
+  else if (position) minutes = Math.max(1, Math.round((distanceKm(position, target) / CITY_SPEED_KMH) * 60));
+  const atTarget = progress !== null && progress.remainingMetres < ARRIVED_WITHIN_M;
   const pill = toPickup
-    ? `To pickup${minutes ? ` · ${minutes} min` : ''}`
+    ? atTarget
+      ? 'At the pickup'
+      : `To pickup${minutes ? ` · ${minutes} min` : ''}`
     : trip.phase === 'collecting'
       ? 'Arrived · collect cash'
-      : `On trip${minutes ? ` · ${minutes} min left` : ''}`;
+      : atTarget
+        ? 'At the drop-off'
+        : `On trip${minutes ? ` · ${minutes} min left` : ''}`;
+  const fitPoints = progress ? [...routeBounds(progress.profile), target] : position ? [position, target] : [target];
 
   return (
     <div className="relative flex-1 overflow-hidden bg-neutral-100">
-      <div className="absolute inset-x-0 top-0" style={{ bottom: SHEET_HEIGHT - 24 }}>
+      <div
+        data-testid="trip-map"
+        data-route={route?.path ?? ''}
+        className="absolute inset-x-0 top-0"
+        style={{ bottom: SHEET_HEIGHT - 24 }}
+      >
         <AppMap defaultCenter={position ?? target} defaultZoom={15}>
           <PlaceDot position={target} kind={toPickup ? 'pickup' : 'dropoff'} />
           {!toPickup && <PlaceDot position={trip.pickup} kind="pickup" />}
-          {position && (
+          {progress ? (
             <>
-              <Polyline path={[position, target]} strokeColor={PIN_COLORS.driverRoute} strokeWeight={5} strokeOpacity={0.9} />
-              <CarMarker position={position} color={PIN_COLORS.driverRoute} />
+              <Polyline path={progress.travelled} strokeColor={PIN_COLORS.travelled} strokeWeight={5} strokeOpacity={0.9} />
+              <Polyline path={progress.remaining} strokeColor={PIN_COLORS.driverRoute} strokeWeight={5} strokeOpacity={0.9} />
             </>
+          ) : (
+            position && (
+              <Polyline path={[position, target]} strokeColor={PIN_COLORS.driverRoute} strokeWeight={5} strokeOpacity={0.9} />
+            )
           )}
-          <FitBounds points={position ? [position, target] : [target]} padding={{ top: 90, bottom: 50, left: 60, right: 60 }} singleZoom={15} />
+          {position && <CarMarker position={position} color={PIN_COLORS.driverRoute} heading={position.heading} />}
+          <FitBounds points={fitPoints} padding={{ top: 90, bottom: 50, left: 60, right: 60 }} singleZoom={15} />
         </AppMap>
       </div>
 
@@ -214,15 +243,26 @@ function ActiveTrip({ trip }: { trip: DriverTrip }) {
           <span className="h-2.5 w-2.5 rounded-pill bg-success-500" />
           <span data-testid="trip-pill">{pill}</span>
         </span>
-        <button
-          type="button"
-          disabled
-          title="Route playback arrives with the simulator's power features (Phase 5)"
-          className="flex items-center gap-2 rounded-pill bg-white px-4 py-2.5 text-[14px] font-bold text-neutral-900 shadow-float"
-        >
-          <Navigation size={16} /> Navigate
-        </button>
+        {trip.phase !== 'collecting' && (
+          <button
+            type="button"
+            disabled={drive.state.status === 'waiting'}
+            onClick={() => drive.request(trip.requestId, toPickup ? 'pickup' : 'dropoff')}
+            title="Ask the simulator to drive this route"
+            className="flex items-center gap-2 rounded-pill bg-white px-4 py-2.5 text-[14px] font-bold text-neutral-900 shadow-float disabled:opacity-70"
+          >
+            <Navigation size={16} /> Navigate
+          </button>
+        )}
       </div>
+      {drive.state.status === 'failed' && (
+        <p
+          data-testid="navigate-error"
+          className="absolute inset-x-4 top-[72px] rounded-control bg-neutral-900/90 px-4 py-2 text-[13px] font-semibold text-white"
+        >
+          {drive.state.message}
+        </p>
+      )}
 
       <div
         className="absolute inset-x-0 bottom-0 overflow-y-auto rounded-t-[24px] bg-white px-5 pt-3 pb-5 shadow-sheet"

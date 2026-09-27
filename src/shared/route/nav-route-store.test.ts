@@ -1,8 +1,8 @@
 import type { NavRoute } from '../tab/types';
 import { encodePolyline } from './polyline';
-import { profileFor, profileTimeAt, splitRoute } from './nav-route';
+import { profileFor, profileTimeAt, routeBounds, routeProgress, splitRoute } from './nav-route';
 import { createNavRouteStore, keepMatching, reduceNavRoutes } from './nav-route-store';
-import { pathOf } from './test-paths';
+import { ORIGIN, offset, pathOf } from './test-paths';
 
 const route = (patch: Partial<NavRoute> = {}): NavRoute => ({
   requestId: 'req-1',
@@ -101,5 +101,32 @@ describe('splitRoute', () => {
     const atEnd = splitRoute(profile, profile.totalMetres);
     expect(atEnd.travelled.at(-1)).toEqual(profile.points.at(-1));
     expect(atEnd.remaining).toHaveLength(1);
+  });
+});
+
+describe('routeProgress', () => {
+  it('places a reported position on the route and says what is left at the playback speed', () => {
+    const r = route({ speedFactor: 5 });
+    const profile = profileFor(r);
+    const progress = routeProgress(r, offset(ORIGIN, 200, 3), r.anchor.atMs);
+    expect(progress.snap.metres).toBeCloseTo(200, 0);
+    expect(progress.remainingMetres).toBeCloseTo(profile.totalMetres - 200, 0);
+    expect(progress.remainingSeconds).toBeCloseTo((profile.totalSeconds - profile.timeAtMetres(200)) / 5, 3);
+  });
+
+  it('uses the route’s timing to pick the pass on a street driven twice', () => {
+    const r = route({ path: encodePolyline(pathOf([0, 0], [300, 0], [0, 0])), steps: [{ metres: 600, seconds: 72 }] });
+    const profile = profileFor(r);
+    const point = offset(ORIGIN, 100, 0);
+    const early = routeProgress(r, point, r.anchor.atMs + profile.timeAtMetres(100) * 1000);
+    const late = routeProgress(r, point, r.anchor.atMs + profile.timeAtMetres(500) * 1000);
+    expect(early.snap.metres).toBeCloseTo(100, 0);
+    expect(late.snap.metres).toBeCloseTo(500, 0);
+  });
+
+  it('gives the route’s bounds', () => {
+    const [sw, ne] = routeBounds(profileFor(route()));
+    expect(sw.lat).toBeCloseTo(ORIGIN.lat, 6);
+    expect(ne.lng).toBeGreaterThan(ORIGIN.lng);
   });
 });

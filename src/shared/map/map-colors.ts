@@ -5,4 +5,6 @@ export const PIN_COLORS = {
   route: '#00a04a',
   driverRoute: '#4f46e5',
   car: '#101614',
+  /** The part of a route already driven. */
+  travelled: '#9ca3af',
 } as const;

@@ -47,26 +47,52 @@ export function PlaceDot({ position, kind }: { position: GeoPoint; kind: 'pickup
   );
 }
 
-/** The assigned driver: a dark rounded car badge (the handoff's black marker). */
-export function CarMarker({ position, color = PIN_COLORS.car }: { position: GeoPoint; color?: string }) {
+/**
+ * The assigned driver: a dark rounded car badge (the handoff's black marker). With a
+ * heading, a small pointer outside the badge shows which way the car is driving — the
+ * badge itself stays upright, as the handoff draws it.
+ */
+export function CarMarker({ position, color = PIN_COLORS.car, heading }: { position: GeoPoint; color?: string; heading?: number }) {
   return (
     <AdvancedMarker position={position} anchorLeft="-50%" anchorTop="-50%" zIndex={30}>
-      <div
-        data-testid="driver-marker"
-        style={{
-          width: 34,
-          height: 26,
-          borderRadius: 8,
-          background: color,
-          color: '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          border: '2px solid #fff',
-          boxShadow: '0 4px 14px rgba(16,22,20,0.3)',
-        }}
-      >
-        <Car size={16} strokeWidth={2.4} />
+      <div style={{ position: 'relative', width: 34, height: 26 }}>
+        {heading !== undefined && (
+          <div
+            data-testid="car-heading"
+            style={{ position: 'absolute', left: '50%', top: '50%', width: 0, height: 0, transform: `rotate(${heading}deg)` }}
+          >
+            <div
+              style={{
+                position: 'absolute',
+                left: -6,
+                top: -30,
+                width: 0,
+                height: 0,
+                borderLeft: '6px solid transparent',
+                borderRight: '6px solid transparent',
+                borderBottom: `9px solid ${color}`,
+              }}
+            />
+          </div>
+        )}
+        <div
+          data-testid="driver-marker"
+          style={{
+            position: 'relative',
+            width: 34,
+            height: 26,
+            borderRadius: 8,
+            background: color,
+            color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            border: '2px solid #fff',
+            boxShadow: '0 4px 14px rgba(16,22,20,0.3)',
+          }}
+        >
+          <Car size={16} strokeWidth={2.4} />
+        </div>
       </div>
     </AdvancedMarker>
   );
