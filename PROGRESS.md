@@ -4,7 +4,7 @@ The working log for this repo. [PLAN.md](PLAN.md) is the design; this file track
 what's next at task level, and what was learned along the way. Update it at the end of
 every working session and every phase.
 
-**Last updated:** 2026-09-27 · **Current phase:** 5 (build plan done, build not started)
+**Last updated:** 2026-09-27 · **Current phase:** 5b next (5 done 2026-09-27)
 
 ---
 
@@ -17,8 +17,8 @@ every working session and every phase.
 | 2 Driver → receiving offers | ✅ done 2026-09-25 | `05a60d8`…`2b74e76` | Unit tests (77), `smoke:firefox` 26/26 (offer in ~150–250ms) |
 | 3 Rider booking happy path | ✅ done 2026-09-26 | `94d6ca1`…`d63c85e` | Unit tests (100), `smoke:firefox` 40/40 (offers to 2 drivers in ~80–110ms, driver move → rider map in <5s) |
 | 4 Trip completion + cancellation | ✅ done 2026-09-26 | `356510e`…`b38e57c` | Unit tests (122), `smoke:firefox` 58/58 (full lifecycle, redispatch, rider cancel mid-trip) |
-| 5 Realistic driving (route playback) | ⏳ next | — | — |
-| 5b Simulator tools (setup, layouts, timeline, inspector) | ☐ | — | — |
+| 5 Realistic driving (route playback) | ✅ done 2026-09-27 | `ac2b40c`…`9adf579` | Unit tests (184), `smoke:firefox` 75/75 (both legs driven, every stored ping ≤25 m from the route — measured 0.0 m) |
+| 5b Simulator tools (setup, layouts, timeline, inspector) | ⏳ next | — | — |
 | 6 Remaining screens | ☐ | — | — |
 
 ### Phase 0 — Foundation ✅
@@ -259,7 +259,7 @@ mid-trip); the rider's `trip_already_rated` path.
 
 ---
 
-## Next: Phase 5 — Realistic driving (simulator route playback)
+### Phase 5 — Realistic driving (simulator route playback) ✅
 
 **Goal:** the simulator drives a driver tab like a real car. The car follows real roads at road-appropriate speeds,
 with no straight-line hops and no teleport to the destination. The driver app and the rider app both show **the same
@@ -466,11 +466,19 @@ Every speed change, pause, resume or reload re-anchors and re-sends `nav-route`.
 - [x] 6 D09 shared route, route ETA, rotating car, Navigate
 - [x] 7 R05 route + tween + route ETA; R06 car on the booked route
 - [x] 8 Smoke test additions — `smoke:firefox` 75/75
-- [ ] 9 Checkpoint docs, commit, push
+- [x] 9 Checkpoint docs, commit, push
 
-### Phase 5b (after 5) — the rest of PLAN §6
+**Built (2026-09-27):**
+- `src/shared/route/` — polyline, geometry, movement profile, snapping, `nav-route` helpers and the per-tab
+  nav-route store (both apps)
+- `src/features/simulator/drive/` — route sources, worker ticker, playback store, supervisor (hold/re-share),
+  automation (auto-drive, trip-over cleanup, `drive-request`), playback card, route overlay
+- D09, R05, R06 draw the shared route; D09 Navigate asks the simulator to drive
+- Not in the smoke test: "×10 finishes proportionally faster" (covered by `playback-store.test.ts` instead)
+
+## Next: Phase 5b — the rest of PLAN §6
 Quick setup (open N driver tabs, scatter online drivers), saved layouts, merged event timeline with filters, trip
-inspector.
+inspector. Not planned at task level yet: start with a short plan, as for Phase 5.
 
 ## Decisions log
 
@@ -503,9 +511,25 @@ inspector.
 | 2026-09-26 | Route computed once per leg by the simulator (Routes API for the approach, booked polyline for the trip) | Backend has no approach route and gives none to the driver |
 | 2026-09-26 | Route shared to both apps over the bus; rider position still only from `driver_location` | No backend changes; the shared route is geometry + timing, not a live position |
 | 2026-09-26 | Playback position from wall clock, ticks from a Worker | Hidden tabs throttle timers (1/s, or 1/min after 5 min in Chrome) |
+| 2026-09-27 | Route engine in `src/shared/route/`, used by the simulator and both apps | Both sides rebuild the identical profile from path + steps; the bus carries no per-tick data |
+| 2026-09-27 | A playback **holds** (not stops) while its driver tab is gone or silent, and resumes when it's back | A driver-tab reload says `bye` then re-announces; stopping would end the drive |
+| 2026-09-27 | Routes are matched on request **and** driver | Redispatch keeps the request id |
+| 2026-09-27 | Playbacks persist in the simulator's `sessionStorage`; routes are re-shared on a tab's first presence | Wall-clock playback resumes exactly after a simulator reload; reloaded app tabs get their route back |
+| 2026-09-27 | Drop-off leg uses the booked polyline only if the driver is ≤100 m from its start, else a fresh route | The PIN can be entered away from the pickup |
+| 2026-09-27 | Snapping keeps one match per pass along the route and picks the pass nearest the hint (the route's timing) | A "prefer ahead of the hint" rule dragged reports forward when the hint was ahead of the car |
+| 2026-09-27 | R05's car trails the real car by ≤ one location report (glides between the last two) | Rider position still comes only from the backend; no extrapolation |
+| 2026-09-27 | Car heading shown as a pointer outside the upright car badge | The handoff's badge is a side-view car; rotating it would turn it upside down |
 | 2026-09-26 | Simulator place search calls Google Places (New) from the browser key | Simulator has no login, so no backend places proxy; user chose adding Places to the key over borrowing a tab's token |
 
 ## Gotchas learned
+
+- **Firefox doesn't run `requestAnimationFrame` in background tabs**, and puppeteer's `waitForFunction` /
+  `waitForSelector` poll on it by default — a wait on a background page stalls for 20–40s. Pass `polling: 500` or
+  bring the page to the front.
+- **"Arriving now" lags arrival by up to ~25s:** the driver's last ping comes ≤15s after the car stops (10s floor,
+  5s evaluation tick), then R05 glides to it over the ping gap.
+- **Simulator "Show on map" centres the map on the tab's marker** — a test click at the map centre hits the marker,
+  not the map.
 
 - **`driver_locations` is one row per driver** (unique `driver_id`, upserted), not a history. To check every ping,
   poll the row (≤2 Hz) during the drive — pings are ≥10s apart, so each change is one ping.
@@ -581,13 +605,16 @@ inspector.
   estimated progress (route duration from `started_at`) rather than a live car. A backend change (keep the stream
   until `trip_ended`, retargeted to the drop-off) would fix it; not planned.
 - **Rider ETA before pickup is straight-line ÷ 30 km/h** (websocket-gateway `tracking/notifier.go`) and ignores roads;
-  Phase 5 computes it on the rider side from the shared route instead.
-- **No route reaches the driver, and none exists for the approach leg**; Phase 5 shares the simulator's route over
-  the bus (dev-only). Backend follow-up if wanted: include a route polyline in `ride_assigned` and the driver's
-  `current-trip`.
+  R05 uses the shared route when the simulator drives the car (Phase 5), the gateway's value otherwise.
+- **No route reaches the driver, and none exists for the approach leg** in the backend; the simulator shares its
+  route over the bus (dev-only, Phase 5). Backend follow-up if wanted: include a route polyline in `ride_assigned`
+  and the driver's `current-trip`.
+- At ×5/×10 the rider's car trails the real one by up to one ping (10s × speed, e.g. 1.5 km at ×10), and R06 can
+  show "0 min" left; at ×1 both are realistic.
+- A driven car stops at the road point nearest the pickup/drop-off pin (~40 m away in tests), not on the pin.
 - ~~Currency~~ — resolved 2026-09-26 (MYR via KUL fare configs).
 - Rider cancel reasons map to the enum (`rider_requested`/`other`) with the wording in `note`; the backend has no
   rider-specific reasons.
 - Simulator actor labels overlap when a rider and driver stand close together.
 - D04/D05 screens (verification, vehicles) and D09–D11 not built yet (Phases 4 and 6).
-- Car movement along a route (asked 2026-09-25, specified 2026-09-26: real roads, same route in both apps) is Phase 5.
+- ~~Car movement along a route~~ — done in Phase 5 (2026-09-27).
